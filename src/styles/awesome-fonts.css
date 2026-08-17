@@ -1,0 +1,32 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/* `themes/awesome.css` asks for the families 'Quicksand' and 'Crimson Pro', which is what
+   fonts.bunny.net would have served. The @fontsource *variable* packages we self-host instead
+   declare 'Quicksand Variable' and 'Crimson Pro Variable' — different names, so the theme's own
+   token values would silently resolve to nothing and fall back to sans-serif. Re-point the two
+   tokens at the names we actually ship.
+
+   Deliberately unlayered: the theme declares these inside `@layer wa-theme`, and an unlayered
+   declaration beats any layered one regardless of specificity. `--wa-font-family-heading` needs no
+   entry — the theme defines it as `var(--wa-font-family-body)`, which picks this up for free. */
+.wa-theme-awesome {
+  --wa-font-family-body: 'Quicksand Variable', sans-serif;
+  --wa-font-family-longform: 'Crimson Pro Variable', serif;
+}
