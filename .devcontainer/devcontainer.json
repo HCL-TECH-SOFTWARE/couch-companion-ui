@@ -1,0 +1,14 @@
+{
+  "name": "couch-companion-ui",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/couch-companion-ui",
+  "forwardPorts": [5173, 5984, 8080],
+  "postCreateCommand": "npm ci",
+  "postStartCommand": "bash scripts/seed-dev.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "vitest.explorer", "runem.lit-plugin"]
+    }
+  }
+}

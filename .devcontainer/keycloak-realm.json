@@ -1,0 +1,66 @@
+{
+  "id": "couch",
+  "realm": "couch",
+  "displayName": "Couch Dev Realm",
+  "enabled": true,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "couch-companion-ui",
+      "enabled": true,
+      "publicClient": true,
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "redirectUris": ["http://localhost:5173/*", "http://localhost:5984/*"],
+      "webOrigins": ["http://localhost:5173", "http://localhost:5984"],
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": ["web-origins", "basic", "profile", "roles", "email"],
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "user", "description": "Standard user role" },
+      { "name": "_admin", "description": "CouchDB administrator role" }
+    ]
+  },
+  "users": [
+    {
+      "username": "hariseldon",
+      "email": "hari.seldon@foundation.org",
+      "firstName": "Hari",
+      "lastName": "Seldon",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["_admin", "user"]
+    },
+    {
+      "username": "gaaldornick",
+      "email": "gaal.dornick@foundation.org",
+      "firstName": "Gaal",
+      "lastName": "Dornick",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["user"]
+    }
+  ]
+}

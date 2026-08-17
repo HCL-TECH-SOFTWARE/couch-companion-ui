@@ -1,0 +1,150 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Cuts a release: gate, bump, package, tag, publish. Started by hand.
+#
+# The version number is decided HERE and nowhere else. package.json is the
+# single source of truth for it — scripts/package.sh names the tarball and the
+# container image straight from it — so this workflow raises that number first
+# and derives the tag from it, rather than being handed a tag and trying to make
+# package.json agree afterwards. validate-release.yml is the net for the other
+# direction: a release cut by hand whose tag does not match package.json.
+#
+# ORDER, AND WHY
+#
+#   1. gate      scripts/check.sh, the same steps ci.yml runs. A release is the
+#                worst place to discover red, and this is the one command that
+#                mirrors CI, so no third copy of the step list exists.
+#   2. bump      npm version, which updates package.json AND package-lock.json.
+#   3. package   scripts/package.sh --fast --no-docker, AFTER the bump, so the
+#                tarball is named for the version being released. --fast because
+#                the gate above already ran everything it would repeat.
+#   4. push      the bump commit, carrying [skip ci] — see ci.yml.
+#   5. publish   the release, tagged from the bump commit, tarball attached.
+#
+# Publishing with GITHUB_TOKEN does NOT start another workflow run: GitHub
+# suppresses that deliberately, to stop workflows triggering each other in a
+# loop. Two consequences worth knowing rather than discovering:
+#
+#   - pages.yml hangs off `workflow_run` on THIS workflow, not off the release
+#     event, because workflow_run is not suppressed the way repository events
+#     are. That is also what makes the ordering real: Pages deploys after the
+#     bump commit is on main, so the published site carries the new version.
+#   - validate-release.yml will NOT run for releases this workflow creates. That
+#     is not a gap: the tag is derived from package.json here, so the two agree
+#     by construction. Validation exists for the hand-cut release, where they
+#     can disagree. Give this job a PAT instead of GITHUB_TOKEN and validation
+#     starts running on both paths.
+#
+# Guarded to github.com like pages.yml, but for a stronger reason: this one
+# WRITES — a commit to main and a public release. This GitHub Enterprise
+# instance is a temporary home with no `ubuntu-latest` runner, so the guard
+# stops a release being cut against the wrong origin the day a runner appears.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver level to raise package.json by
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Exact version instead of a bump, e.g. 1.0.0-rc.1 (optional)
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The bump is committed back, so this needs a branch and not the
+          # detached HEAD a default checkout leaves behind.
+          ref: main
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      # The whole merge gate in one command — lint, tests, typecheck, build, the
+      # first-paint budget and both browser smoke pages. --fast only skips the
+      # `npm ci` it would otherwise repeat, not any check.
+      - name: Gate (scripts/check.sh, same steps as ci.yml)
+        run: scripts/check.sh --fast
+
+      - name: Bump the version
+        id: bump
+        run: |
+          set -euo pipefail
+          # An explicit version wins when given; that is the only way to reach a
+          # prerelease like 1.0.0-rc.1, which no semver level can express.
+          target='${{ inputs.version }}'
+          [ -n "$target" ] || target='${{ inputs.bump }}'
+          # --no-git-tag-version: the commit and the tag are made below, with a
+          # message this workflow controls. npm's own would not carry [skip ci].
+          # npm prints the new version as `vX.Y.Z`. Strip the leading v only —
+          # deleting every `v` would quietly mangle a tag like 1.0.0-preview.1.
+          version=$(npm version "$target" --no-git-tag-version)
+          version=${version#v}
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          printf 'releasing %s\n' "$version"
+
+      # After the bump: package.sh reads the version out of package.json, and
+      # the tarball is named for it. --no-docker keeps this to the artifact a
+      # GitHub release can carry; the image is still built by hand.
+      - name: Package the tarball
+        run: scripts/package.sh --fast --no-docker
+
+      - name: Commit and push the bump
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          # [skip ci] belongs in the message even though a GITHUB_TOKEN push
+          # cannot start a workflow anyway: it is what keeps this safe if the
+          # token is ever swapped for a PAT, and ci.yml reads it too.
+          git commit -m "chore(release): ${{ steps.bump.outputs.version }} [skip ci]"
+          git push origin main
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # --target the pushed bump commit, so the tag names the tree whose
+          # package.json says ${{ steps.bump.outputs.version }} — the invariant
+          # validate-release.yml checks on hand-cut releases.
+          gh release create '${{ steps.bump.outputs.tag }}' \
+            --target "$(git rev-parse HEAD)" \
+            --title '${{ steps.bump.outputs.tag }}' \
+            --generate-notes \
+            "release/couch-companion-ui-${{ steps.bump.outputs.version }}.tar.gz"

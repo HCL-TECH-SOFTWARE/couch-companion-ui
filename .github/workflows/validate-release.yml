@@ -1,0 +1,81 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# One invariant, checked on every published release:
+#
+#   the tag is `v` + the package.json version of the commit it points at
+#
+# It matters because package.json is what the artifacts are named from —
+# scripts/package.sh builds `couch-companion-ui-<version>.tar.gz` and
+# `couch-companion:<version>` straight out of it. A release tagged v0.3.4 whose
+# tree says 0.2.0 ships a tarball nobody can match to the release they
+# downloaded it from, and nothing else would ever say so.
+#
+# WHEN THIS ACTUALLY RUNS. Not for releases cut by release.yml: publishing with
+# GITHUB_TOKEN does not start another workflow run, and those tags are derived
+# from package.json anyway, so they agree by construction. This is the net for
+# the release made by hand in the web UI — where the version is typed, and
+# typing is where the two drift apart. Swap release.yml's token for a PAT and
+# this begins running on both paths, which is a fine thing to want.
+#
+# Read-only, so unlike release.yml it carries no github.com guard: there is
+# nothing here that could do damage against the wrong origin.
+
+name: Validate Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  versions-match:
+    runs-on: ubuntu-latest
+    steps:
+      # The tag, not the default branch: the question is what the released tree
+      # says, and main may already have moved on.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Tag must match package.json
+        run: |
+          set -euo pipefail
+          tag='${{ github.event.release.tag_name }}'
+          package=$(node -p 'require("./package.json").version')
+          expected="v$package"
+
+          printf 'release tag     %s\n' "$tag"
+          printf 'package.json    %s  (expected tag %s)\n' "$package" "$expected"
+
+          if [ "$tag" != "$expected" ]; then
+            printf '\n::error::Release %s was cut from a tree whose package.json says %s.\n' "$tag" "$package"
+            cat <<EOF
+
+          The artifacts for this release are named from package.json, so it would
+          ship couch-companion-ui-$package.tar.gz under a release called $tag.
+
+          Either retag the release at a commit whose package.json says ${tag#v},
+          or cut releases with the Release workflow, which raises package.json
+          first and derives the tag from it so the two cannot disagree.
+          EOF
+            exit 1
+          fi
+
+          printf '\nversions match\n'

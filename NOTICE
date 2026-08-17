@@ -1,0 +1,129 @@
+Couch Companion UI
+Copyright 2025-2026 HCL America Inc.
+
+This product includes software developed at HCL America Inc.
+(https://www.hcl-software.com/).
+
+Couch Companion UI is licensed under the Apache License, Version 2.0. The full
+text of that license is in the LICENSE file distributed with this work.
+
+
+==============================================================================
+STATUS OF THIS FILE
+==============================================================================
+
+Every source file in this repository carries the standard Apache source
+header, and that header directs the reader here "for additional information
+regarding copyright ownership". This is that information.
+
+This codebase is being prepared for donation to the Apache Software
+Foundation. Until a Software Grant Agreement is executed and the donation
+accepted, copyright in the original work remains with HCL America Inc. and
+with the individual contributors listed in COMMITTERS.md, and this project is
+NOT an Apache Software Foundation project: it does not carry the Apache brand
+and is not endorsed by, or affiliated with, the ASF.
+
+Couch Companion UI is a derivative of the Couch Companion (CCA) frontend, which
+is why the copyright range opens in 2025: a handful of modules — the custom
+event router and its transports — carry forward from that parent work. Their
+provenance is recorded in COMMITTERS.md and in this repository's git history.
+
+On acceptance, the first five lines of this file are replaced by the standard
+foundation notice:
+
+    Couch Companion UI
+    Copyright 2025-2026 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (https://www.apache.org/).
+
+Nothing below that point changes at donation — the third-party obligations are
+the same either way.
+
+
+==============================================================================
+THIRD-PARTY COMPONENTS
+==============================================================================
+
+The source tree contains no third-party code. Everything under src/, test/,
+scripts/, eslint-rules/, and docs/ is original work licensed under the Apache
+License 2.0; third-party packages are resolved from npm at build time and
+node_modules/ is not tracked in git.
+
+The distribution is a different matter. Couch Companion UI is a browser
+application with a hard requirement that it run air-gapped, reaching no
+third-party host at runtime (see vite.config.ts). Meeting that requirement
+means `npm run build` copies the components below into dist/, and the release
+tarball produced by scripts/package.sh wraps that same directory. Anyone
+redistributing dist/ or the tarball is redistributing these components too,
+and must carry the notices in this section along with them.
+
+The full text of each license named here is appended to the LICENSE file
+under "COUCH COMPANION UI SUBCOMPONENTS".
+
+------------------------------------------------------------------------------
+Lit — https://lit.dev/
+    Packages: lit, lit-html, lit-element, @lit/reactive-element
+    License:  BSD 3-Clause "New" or "Revised" License
+
+    Copyright (c) 2017 Google LLC. All rights reserved.
+
+------------------------------------------------------------------------------
+Web Awesome — https://webawesome.com/
+    Package:  @awesome.me/webawesome
+    License:  MIT License
+
+    Copyright (c) 2025 Fonticons, Inc.
+
+------------------------------------------------------------------------------
+Monaco Editor — https://github.com/microsoft/monaco-editor
+    Package:  monaco-editor
+    License:  MIT License
+
+    Copyright (c) 2016 - present Microsoft Corporation
+
+------------------------------------------------------------------------------
+D3 — https://d3js.org
+    Package:  d3, and the d3-* modules it re-exports
+    License:  ISC License
+
+    Copyright 2010-2023 Mike Bostock
+
+    Individual d3-* modules carry their own copyright line with an end year
+    between 2021 and 2023; all name the same holder under the same terms.
+
+------------------------------------------------------------------------------
+Quicksand — https://fontsource.org/fonts/quicksand
+    Package:  @fontsource-variable/quicksand
+    License:  SIL Open Font License 1.1
+
+    Copyright 2019 The Quicksand Project Authors
+    (https://github.com/andrew-paglinawan/QuicksandFamily.git),
+    with Reserved Font Name "Quicksand".
+
+------------------------------------------------------------------------------
+Crimson Pro — https://fontsource.org/fonts/crimson-pro
+    Package:  @fontsource-variable/crimson-pro
+    License:  SIL Open Font License 1.1
+
+    Copyright 2018 The Crimson Pro Project Authors
+    (https://github.com/Fonthausen/CrimsonPro).
+
+------------------------------------------------------------------------------
+Font Awesome Free — https://fontawesome.com
+    Package:  @fortawesome/fontawesome-free
+    License:  CC BY 4.0 License (the portion redistributed here)
+
+    Copyright (c) 2026 Fonticons, Inc. (https://fontawesome.com)
+
+    Only the SVG icon artwork is redistributed. vite.config.ts copies the
+    package's svgs/ directory into dist/icons/ and nothing else, so of the
+    three licenses the package declares — CC BY 4.0 for icons, SIL OFL 1.1
+    for the webfonts, MIT for the code — only CC BY 4.0 applies to what
+    ships. Attribution is required and is given here.
+
+    Redistribution note: the icons are shipped whole and unmodified. The set
+    is not curated down to the icons the source references, because icon
+    names are runtime data — an administrator can type any Font Awesome name
+    into the banner icon field. See the comment on `localIcons` in
+    vite.config.ts.

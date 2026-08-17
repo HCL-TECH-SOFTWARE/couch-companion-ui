@@ -1,0 +1,86 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/typescript-node:dev-24
+    volumes:
+      - ..:/workspaces/couch-companion-ui:cached
+    command: sleep infinity
+    networks:
+      - ccui-net
+    depends_on:
+      couchdb:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  couchdb:
+    image: couchdb:3
+    environment:
+      COUCHDB_USER: admin
+      COUCHDB_PASSWORD: password
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+    ports:
+      - "5984:5984"
+    networks:
+      - ccui-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5984/_up || exit 1"]
+      interval: 5s
+      retries: 20
+      timeout: 3s
+      start_period: 10s
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+    command: start-dev --import-realm
+    volumes:
+      - ./keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro
+      - keycloak_data:/opt/keycloak/data/
+    ports:
+      - "8080:8080"
+    networks:
+      - ccui-net
+    healthcheck:
+      test: [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET
+          /realms/couch/.well-known/openid-configuration HTTP/1.1\\r\\nHost:
+          localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep
+          -q 'jwks_uri'",
+        ]
+      interval: 10s
+      retries: 30
+      timeout: 5s
+      start_period: 90s
+    restart: unless-stopped
+
+networks:
+  ccui-net:
+    driver: bridge
+
+volumes:
+  couchdb_data:
+  keycloak_data:

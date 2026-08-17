@@ -1,0 +1,73 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # The version bump release.yml pushes back to main is not worth a full gate
+    # run: it changes two numbers in package.json and package-lock.json, on a
+    # tree this gate went green on minutes earlier, inside the release job (#155).
+    #
+    # Belt and braces, and deliberately so. That push already cannot start a run
+    # twice over — GitHub suppresses workflow triggers for events raised with
+    # GITHUB_TOKEN, and it honours [skip ci] in a push's head commit natively.
+    # This line is the one that keeps holding if the token is ever swapped for a
+    # PAT, which is the moment both of those stop applying.
+    #
+    # `head_commit` exists only on push; on pull_request it is null, contains()
+    # is false, and the job runs as it always has.
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npx vite build
+      # Measures the build instead of running it: how many bytes a browser must
+      # fetch before first paint, and whether Monaco is among them. Nothing else
+      # in this job measures size, which is how a `manualChunks` rule sat in
+      # vite.config.ts putting 1.4 MB gzip on the critical path for the whole
+      # life of the project with every other gate green (#150).
+      # Mirrored by scripts/check.sh — change both together.
+      - run: node scripts/bundle-budget.mjs
+      # The only step that runs built, minified code in a real browser, and the
+      # only kind of check that could have caught #30 — a view tester broken in
+      # every production build while `npm run check` stayed green, because vitest
+      # runs unminified and happy-dom has no Worker. `ubuntu-latest` ships Google
+      # Chrome; set CHROME_PATH on a runner image that does not.
+      # Mirrored by scripts/check.sh — change both together.
+      - run: node scripts/smoke.mjs
+      # SPA mode (spec D5): a cross-origin CouchDB, a real cookie jar, a real
+      # CSP — none of which happy-dom or Node's fetch has, so `npm run check`
+      # cannot express any of it (#37). Credential-gated: with no CCA_SPA_*
+      # variables set it prints a visible skip and exits 0, which is what keeps
+      # this job hermetic. Point it at a real CouchDB to actually run it.
+      # Mirrored by scripts/check.sh — change both together.
+      - run: node scripts/spa-check.mjs
