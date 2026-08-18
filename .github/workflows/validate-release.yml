@@ -50,7 +50,7 @@ jobs:
     steps:
       # The tag, not the default branch: the question is what the released tree
       # says, and main may already have moved on.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
 
