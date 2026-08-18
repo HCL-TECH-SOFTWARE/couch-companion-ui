@@ -23,6 +23,7 @@ import { ConfigService } from "./config-service.js";
 import { CouchCompanionStore, ID_PREFIX } from "./git/couchcompanion-store.js";
 import { detectNativeIdp } from "./native-idp.js";
 import { fetchJson } from "./oidc-http.js";
+import { idpConnectOrigins } from "./idp-origins.js";
 import {
   escapeForCouchConfig,
   jwkToSpkiPem,
@@ -204,6 +205,15 @@ export class IdpService {
       roles_claim: req.roles_claim ?? "roles",
       idp_only: req.idp_only,
       alg: "RS256",
+      // Computed here and stored, because this is the only moment all three endpoints are in hand:
+      // the discovery document is read into memory during registration and then discarded (#119),
+      // and jwks_uri and token_endpoint can each live on a host the issuer does not name. See
+      // idpConnectOrigins and #149.
+      csp_origins: idpConnectOrigins({
+        well_known_url: req.well_known_url,
+        jwks_uri: oidc.jwks_uri,
+        token_endpoint: oidc.token_endpoint,
+      }),
       last_refreshed: now,
       created_at: now,
     };
@@ -261,6 +271,14 @@ export class IdpService {
     const entry: OidcEntry = {
       ...provider.entry,
       issuer: oidc.issuer,
+      // Recomputed, not carried over: a provider that moved its jwks or token endpoint announces it
+      // here and nowhere else, and this is also how an entry written before csp_origins existed
+      // acquires the two origins that cannot be derived from anything stored (#149).
+      csp_origins: idpConnectOrigins({
+        well_known_url: provider.entry.well_known_url,
+        jwks_uri: oidc.jwks_uri,
+        token_endpoint: oidc.token_endpoint,
+      }),
       last_refreshed: new Date().toISOString(),
     };
 
@@ -466,6 +484,7 @@ export class IdpService {
       client_id: entry.client_id,
       roles_claim: entry.roles_claim,
       idp_only: entry.idp_only,
+      csp_origins: entry.csp_origins,
       jwks_keys,
       last_refreshed: entry.last_refreshed,
       created_at: entry.created_at,

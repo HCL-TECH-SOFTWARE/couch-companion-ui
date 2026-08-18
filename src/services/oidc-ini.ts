@@ -51,6 +51,7 @@
  * ```
  */
 
+import { idpConnectOrigins } from "./idp-origins.js";
 import type { NodeConfig } from "../plugins/config/types.js";
 
 /** Lowercase, like every CouchDB built-in section — section names are case-sensitive. */
@@ -110,6 +111,20 @@ export interface OidcEntry {
    *  otherwise identical entries, and the one thing here that is per-key rather than
    *  per-provider, so it cannot be re-derived from the discovery document. */
   alg: string;
+  /**
+   * The origins this provider needs on CouchDB's `/_utils` `connect-src`, as computed from its
+   * discovery document at registration and at every refresh (#149).
+   *
+   * Stored rather than derived, because the endpoints the browser actually fetches — discovery,
+   * jwks_uri, token_endpoint — can sit on three different hosts (Google's do), and only two of
+   * them are recoverable from anything else kept here. Re-reading discovery to find them again
+   * would mean a network call from the very screen whose problem may be that the policy is
+   * blocking network calls.
+   *
+   * Empty on an entry written before this field existed; {@link requiredIdpOrigins} falls back to
+   * the `well_known_url` origin for those, and a refresh fills the rest in.
+   */
+  csp_origins: string[];
   last_refreshed: string | null;
   created_at: string;
 }
@@ -122,6 +137,38 @@ export interface OidcEntry {
 export const DEFAULT_SCOPES = ["openid", "profile", "email"];
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+
+/**
+ * A stored string array, defended against every shape an older entry can present it in: absent,
+ * `null`, or something that is not an array at all. Returning `[]` for all of them is what keeps a
+ * pre-#149 entry from crashing a render that assumes it can iterate.
+ */
+const strArray = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+
+/**
+ * The origins for `connect-src`, recovered from whichever shape this entry is in (#149).
+ *
+ * Written entries carry `csp_origins` outright. An entry from before #119 does not — but it copied
+ * the whole discovery document into the ini value, `jwks_uri` and `token_endpoint` included, and
+ * those are exactly the two origins nothing else here can prove. Reading them back is the one
+ * place this module still looks at the fat fields, and it earns it: without them such a provider
+ * would contribute only its discovery origin, and the CSP check would then report a policy as
+ * sufficient while the token exchange stayed blocked. A confidently wrong green is worse than a
+ * warning.
+ *
+ * An entry written in between the two — slim, but before `csp_origins` existed — has neither, and
+ * falls back to its discovery origin until someone refreshes it.
+ */
+function cspOrigins(e: Record<string, unknown>): string[] {
+  const stored = strArray(e.csp_origins);
+  if (stored.length > 0) return stored;
+  return idpConnectOrigins({
+    well_known_url: str(e.well_known_url),
+    jwks_uri: str(e.jwks_uri),
+    token_endpoint: str(e.token_endpoint),
+  });
+}
 
 /**
  * Parses one `[oidc]` value. Returns `null` for anything that is not usable metadata — bad
@@ -153,6 +200,7 @@ export function parseEntry(raw: string): OidcEntry | null {
     roles_claim: str(e.roles_claim) ?? "roles",
     idp_only: e.idp_only === true,
     alg: str(e.alg) ?? "RS256",
+    csp_origins: cspOrigins(e),
     last_refreshed: str(e.last_refreshed),
     created_at: str(e.created_at) ?? "",
   };

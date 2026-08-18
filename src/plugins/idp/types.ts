@@ -34,6 +34,12 @@ export interface IdpConfig {
   /** Whether the login screen offers this provider *instead of* the password form (#119). */
   idp_only: boolean;
   jwks_keys: JwkKey[];
+  /**
+   * The origins this provider needs on CouchDB's `/_utils` `connect-src` — discovery, jwks and
+   * token endpoints, which need not share a host (#149). Empty for an entry registered before the
+   * field existed; a refresh fills it in.
+   */
+  csp_origins: string[];
   last_refreshed: string | null;
   created_at: string;
 }

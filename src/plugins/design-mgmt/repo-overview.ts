@@ -49,7 +49,7 @@ import type { ConnectGitAccountRequest } from '../../services/design-mgmt-servic
 import { blockedRequestAdvice } from './git-sync-ui.js';
 import { requiredGitOrigins } from '../../services/csp-policy.js';
 import '../../components/cca-data-table.js';
-import './csp-check.js';
+import '../../components/cca-csp-check.js';
 
 const log = getLogger('plugins/design-mgmt/repo-overview');
 
@@ -573,7 +573,13 @@ export class CcaRepoOverview extends CcaElement {
         }}
         style="margin-bottom:1rem;display:block"
       ></wa-input>
-      <cca-csp-check .origins=${requiredGitOrigins(this.accountsWithRepos)}></cca-csp-check>
+      <cca-csp-check
+        .origins=${requiredGitOrigins(this.accountsWithRepos)}
+        .subject=${'git sync'}
+        .blockedSymptom=${'git sync fails with "Failed to fetch" and nothing appears in the network tab'}
+        .emptyMessage=${'No git accounts are connected yet, so there is nothing for the policy to allow.'}
+        view-tester
+      ></cca-csp-check>
       ${this._renderContent()} ${this._renderDeleteAccountDialog()}
       ${this._renderEditAccountDrawer()} ${this._renderDeleteRepoDialog()}
       ${this._renderUnlinkTargetDialog()}

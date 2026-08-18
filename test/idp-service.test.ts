@@ -212,6 +212,7 @@ describe('createIdp', () => {
       'alg',
       'client_id',
       'created_at',
+      'csp_origins',
       'idp_only',
       'issuer',
       'last_refreshed',
@@ -221,6 +222,51 @@ describe('createIdp', () => {
     ]);
     expect(stored.idp_only).toBe(true);
     expect(stored.well_known_url).toBe(WELL_KNOWN);
+  });
+
+  /*
+   * The origins CouchDB's /_utils CSP has to permit, captured at registration because this is the
+   * only moment they are all known: the discovery document is read into memory and then discarded
+   * (#119). Google's three endpoints sit on three hosts, so a provider that splits them is the
+   * case worth pinning, not the single-host one every local Keycloak happens to be (#149).
+   */
+  it('stores the origins of all three endpoints the browser fetches, across hosts', async () => {
+    const SPLIT_JWKS = 'https://keys.example.net/oauth2/v3/certs';
+    const discovery = {
+      ...DISCOVERY_DOC,
+      jwks_uri: SPLIT_JWKS,
+      token_endpoint: 'https://tokens.example.org/token',
+    };
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation(async (url: string) =>
+        jsonResponse(url === SPLIT_JWKS ? { keys: [RSA_JWK] } : discovery),
+      );
+    const { api, sections } = fakeApi();
+    const svc = service(api, fakeStore().store);
+
+    await svc.createIdp(createRequest);
+
+    const stored = JSON.parse(sections.oidc![oidcKey(RSA_JWK.kid)]);
+    expect(stored.csp_origins).toEqual([
+      'http://localhost:8080',
+      'https://keys.example.net',
+      'https://tokens.example.org',
+    ]);
+  });
+
+  /* authorization_endpoint is a navigation, which no connect-src governs. */
+  it('leaves the authorization endpoint out — a redirect is not a fetch', async () => {
+    globalThis.fetch = idpNetwork({
+      discovery: { ...DISCOVERY_DOC, authorization_endpoint: 'https://login.elsewhere.test/auth' },
+    });
+    const { api, sections } = fakeApi();
+    const svc = service(api, fakeStore().store);
+
+    await svc.createIdp(createRequest);
+
+    const stored = JSON.parse(sections.oidc![oidcKey(RSA_JWK.kid)]);
+    expect(stored.csp_origins).toEqual(['http://localhost:8080']);
   });
 
   it('converts the fetched JWKS to the PEM CouchDB config wants', async () => {

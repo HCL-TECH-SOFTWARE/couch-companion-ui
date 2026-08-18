@@ -29,6 +29,9 @@ import {
   type HeaderAction,
 } from "../../components/cca-header.js";
 import { oidcKey } from "../../services/oidc-ini.js";
+import { connectSrcValues, removeConnectSrcOrigins } from "../../services/csp-policy.js";
+import { releasableIdpOrigins } from "../../services/idp-origins.js";
+import { SINGLE_SERVER_ID } from "../../services/single-server.js";
 import type { IdpConfig, JwkKey } from "./types.js";
 import type { UpdateIdpRequest } from "../../services/idp-service.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
@@ -343,8 +346,11 @@ export class CcaIdpDetail extends LitElement {
   private async handleDelete() {
     if (this.deleting) return;
     this.deleting = true;
+    // Read before the delete: afterwards the entry is gone and its origins with it.
+    const removed = this.idp;
     try {
       await getContext().idp.deleteIdp(this.id);
+      await this.releaseCspOrigins(removed);
       toast(`IdP deleted`, "success");
       getContext().router.navigate("/idp");
     } catch (err) {
@@ -355,6 +361,55 @@ export class CcaIdpDetail extends LitElement {
       );
     } finally {
       this.deleting = false;
+    }
+  }
+
+  /**
+   * Takes the deleted provider's origins back out of `connect-src` — and only the ones nothing
+   * else still needs (#149).
+   *
+   * THE SUBTRACTION IS THE POINT. Two providers on one host is ordinary: a Keycloak realm per
+   * tenant, or an issuer whose jwks sits on its own domain. Removing an origin because one of them
+   * went away would break the other's login silently, which is the same bug as never adding it.
+   * {@link releasableIdpOrigins} computes the difference against what remains.
+   *
+   * Only widening is a decision worth asking about, which is why adding is a switch on the list
+   * screen and removing is not: narrowing takes away a permission the operator granted for a
+   * provider that no longer exists. What it cannot see is an origin some *other* feature needs —
+   * a git host that happens to be the same server — so it removes only what it can prove this
+   * provider contributed, and git sync's own check would offer it back.
+   *
+   * Never fatal. The provider is already gone by the time this runs, so a failure here is not a
+   * failed delete; it is reported on its own terms, because only a server admin reaches this
+   * screen at all and a refusal would be genuinely surprising.
+   *
+   * Public for the delete handler and for tests, the same way `cca-csp-check` exposes its switch.
+   */
+  async releaseCspOrigins(removed: IdpConfig | null): Promise<void> {
+    const ctx = getContext();
+    // SPA mode: the policy belongs to whoever serves the page, and CouchDB's config key is not it.
+    if (!removed || ctx.deployment.mode !== "same-origin") return;
+    try {
+      const releasable = releasableIdpOrigins(removed, await ctx.idp.listIdps());
+      if (releasable.length === 0) return;
+
+      const policy = await ctx.csp.readUtilsPolicy();
+      if (typeof policy !== "string") return;
+      // Only what the policy actually lists: a wildcard or a host pattern the operator wrote is
+      // not ours to edit, and rewriting the header to remove something that was never there would
+      // be a config write with no effect.
+      const listed = connectSrcValues(policy) ?? [];
+      const removable = releasable.filter((origin) => listed.includes(origin));
+      if (removable.length === 0) return;
+
+      await ctx.csp.writeUtilsPolicy(SINGLE_SERVER_ID, removeConnectSrcOrigins(policy, removable));
+      toast(`Removed ${removable.join(", ")} from the Content-Security-Policy.`, "success");
+    } catch (err) {
+      log.error("Could not narrow the Content-Security-Policy after deleting an IdP", err as Error);
+      toast(
+        "The IdP was deleted, but its origins are still allowed by the Content-Security-Policy.",
+        "error",
+      );
     }
   }
 

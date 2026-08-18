@@ -28,9 +28,11 @@ import {
 } from "../../components/cca-header.js";
 import type { IdpConfig } from "./types.js";
 import type { TableColumn } from "../../components/cca-data-table.js";
+import { requiredIdpOrigins } from "../../services/idp-origins.js";
 
 const log = getLogger("plugins/idp/idp-list");
 import "../../components/cca-data-table.js";
+import "../../components/cca-csp-check.js";
 import "@awesome.me/webawesome/dist/components/badge/badge.js";
 
 @customElement("cca-idp-list")
@@ -148,6 +150,18 @@ export class CcaIdpList extends LitElement {
   render() {
     return html`
       ${this.renderOrphans()}
+      <!--
+        On the drop-in, CouchDB's own /_utils policy is what decides whether the browser may talk
+        to the identity provider at all, and it refuses cross-origin connections by default. The
+        origins come from what is registered (#149); the component hides itself entirely in SPA
+        mode, where the policy belongs to whoever serves the page instead.
+      -->
+      <cca-csp-check
+        .origins=${requiredIdpOrigins(this.idps)}
+        .subject=${"single sign-on"}
+        .blockedSymptom=${"signing in fails — discovery, the signing keys or the token exchange never leave the browser, and nothing appears in the network tab"}
+        .emptyMessage=${"No identity providers are registered yet, so there is nothing for the policy to allow."}
+      ></cca-csp-check>
       <cca-data-table
         .columns=${this._columns as any[]}
         .rows=${this.idps}

@@ -25,8 +25,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getContext } from '../src/context';
 import type { Deployment } from '../src/services/deployment-mode';
-import '../src/plugins/design-mgmt/csp-check';
-import type { CcaCspCheck } from '../src/plugins/design-mgmt/csp-check';
+import '../src/components/cca-csp-check';
+import type { CcaCspCheck } from '../src/components/cca-csp-check';
 
 /** What CouchDB 3.5.2 sends on `/_utils/` — the policy with no `connect-src` at all. */
 const COUCHDB_DEFAULT =
@@ -49,6 +49,12 @@ async function mount(policy: string | null, origins: string[] = [GITHUB]): Promi
   vi.spyOn(getContext().csp, 'readUtilsPolicy').mockResolvedValue(policy);
   const el = document.createElement('cca-csp-check') as CcaCspCheck;
   el.origins = origins;
+  // What repo-overview.ts passes. The component's copy and its second switch are per-screen since
+  // #149, so a mount with the defaults would be testing a configuration nothing ships.
+  el.subject = 'git sync';
+  el.blockedSymptom = 'git sync fails with "Failed to fetch" and nothing appears in the network tab';
+  el.emptyMessage = 'No git accounts are connected yet, so there is nothing for the policy to allow.';
+  el.viewTester = true;
   document.body.appendChild(el);
   mounted.push(el);
   await el.reload();
@@ -141,18 +147,18 @@ describe('cca-csp-check', () => {
   describe('the toggle', () => {
     it('writes exactly the header docs/install.md documents, keeping every other directive', async () => {
       const el = await mount(COUCHDB_DEFAULT);
-      expect((q(el, '[data-git-access]') as HTMLInputElement).checked).toBe(false);
+      expect((q(el, '[data-origin-access]') as HTMLInputElement).checked).toBe(false);
 
-      await el.setGitAccess(true);
+      await el.setOriginAccess(true);
 
       expect(write).toHaveBeenCalledWith(getContext().selectedServer, EXTENDED);
     });
 
     it('turning it off restores the header byte for byte', async () => {
       const el = await mount(EXTENDED);
-      expect((q(el, '[data-git-access]') as HTMLInputElement).checked).toBe(true);
+      expect((q(el, '[data-origin-access]') as HTMLInputElement).checked).toBe(true);
 
-      await el.setGitAccess(false);
+      await el.setOriginAccess(false);
 
       expect(write).toHaveBeenCalledWith(getContext().selectedServer, COUCHDB_DEFAULT);
     });
@@ -161,32 +167,32 @@ describe('cca-csp-check', () => {
       const el = await mount(COUCHDB_DEFAULT);
       const read = vi.spyOn(getContext().csp, 'readUtilsPolicy').mockResolvedValue(EXTENDED);
 
-      await el.setGitAccess(true);
+      await el.setOriginAccess(true);
       await el.updateComplete;
 
       expect(read).toHaveBeenCalled();
       expect(q(el, '[data-live-policy]')!.textContent).toBe(EXTENDED);
-      expect((q(el, '[data-git-access]') as HTMLInputElement).checked).toBe(true);
+      expect((q(el, '[data-origin-access]') as HTMLInputElement).checked).toBe(true);
     });
 
     it('does not write the config when the policy already says what is being asked for', async () => {
       const el = await mount(EXTENDED);
-      await el.setGitAccess(true);
+      await el.setOriginAccess(true);
       expect(write).not.toHaveBeenCalled();
     });
 
     it('offers nothing when no git account is connected', async () => {
       const el = await mount(COUCHDB_DEFAULT, []);
 
-      expect(q(el, '[data-no-accounts]')).not.toBeNull();
-      expect(q(el, '[data-git-access]')).toBeNull();
-      await el.setGitAccess(true);
+      expect(q(el, '[data-nothing-configured]')).not.toBeNull();
+      expect(q(el, '[data-origin-access]')).toBeNull();
+      await el.setOriginAccess(true);
       expect(write).not.toHaveBeenCalled();
     });
 
     it('derives an Enterprise origin from the account, never a hardcoded github.com', async () => {
       const el = await mount(COUCHDB_DEFAULT, ['https://ghe.example.com']);
-      await el.setGitAccess(true);
+      await el.setOriginAccess(true);
 
       expect(write).toHaveBeenCalledWith(
         getContext().selectedServer,
@@ -204,7 +210,7 @@ describe('cca-csp-check', () => {
       const el = await mount("default-src 'self'; connect-src *;");
 
       expect(q(el, '[data-csp-check]')!.getAttribute('variant')).toBe('neutral');
-      expect(q(el, '[data-git-access]')).toBeNull();
+      expect(q(el, '[data-origin-access]')).toBeNull();
       expect(q(el, '[data-copy-only]')).toBeNull();
       expect(q(el, '[data-already-allowed]')).not.toBeNull();
     });
@@ -213,7 +219,7 @@ describe('cca-csp-check', () => {
       const el = await mount(EXTENDED);
 
       expect(q(el, '[data-csp-check]')!.getAttribute('variant')).toBe('neutral');
-      expect((q(el, '[data-git-access]') as HTMLInputElement).checked).toBe(true);
+      expect((q(el, '[data-origin-access]') as HTMLInputElement).checked).toBe(true);
     });
   });
 
@@ -225,7 +231,7 @@ describe('cca-csp-check', () => {
       const el = await mount(COUCHDB_DEFAULT);
       expect((q(el, '[data-unsafe-eval]') as HTMLInputElement).checked).toBe(true);
 
-      await el.setGitAccess(true);
+      await el.setOriginAccess(true);
 
       const written = write.mock.calls[0][1] as string;
       expect(written).toContain("script-src 'self' 'unsafe-eval'");
@@ -267,6 +273,7 @@ describe('cca-csp-check', () => {
 
       const el = document.createElement('cca-csp-check') as CcaCspCheck;
       el.origins = [GITHUB];
+      el.viewTester = true;
       document.body.appendChild(el);
       mounted.push(el);
       await el.updateComplete;
@@ -279,7 +286,7 @@ describe('cca-csp-check', () => {
       vi.spyOn(getContext().auth, 'isAdmin', 'get').mockReturnValue(false);
       const el = await mount(COUCHDB_DEFAULT);
 
-      expect(q(el, '[data-git-access]')).toBeNull();
+      expect(q(el, '[data-origin-access]')).toBeNull();
       expect(q(el, '[data-unsafe-eval]')).toBeNull();
       expect(q(el, '[data-desired-header]')!.textContent).toBe(EXTENDED);
       expect(q(el, '[data-curl]')!.textContent).toContain(
@@ -291,7 +298,7 @@ describe('cca-csp-check', () => {
       // for a typo or for a component that stopped rendering a switch at all.
       vi.spyOn(getContext().auth, 'isAdmin', 'get').mockReturnValue(true);
       const adminEl = await mount(COUCHDB_DEFAULT);
-      expect(q(adminEl, '[data-git-access]')).not.toBeNull();
+      expect(q(adminEl, '[data-origin-access]')).not.toBeNull();
 
       expect(write).not.toHaveBeenCalled();
     });
@@ -304,10 +311,10 @@ describe('cca-csp-check', () => {
       );
       const el = await mount(COUCHDB_DEFAULT);
 
-      await el.setGitAccess(true);
+      await el.setOriginAccess(true);
       await el.updateComplete;
 
-      expect(q(el, '[data-git-access]')).toBeNull();
+      expect(q(el, '[data-origin-access]')).toBeNull();
       expect(q(el, '[data-copy-only]')).not.toBeNull();
       expect(q(el, '[data-error]')!.textContent).toContain('not a server admin');
     });

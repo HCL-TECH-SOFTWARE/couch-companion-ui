@@ -23,9 +23,9 @@ import '@awesome.me/webawesome/dist/components/switch/switch.js';
 import '@awesome.me/webawesome/dist/components/button/button.js';
 import '@awesome.me/webawesome/dist/components/icon/icon.js';
 import '@awesome.me/webawesome/dist/components/callout/callout.js';
-import { getContext } from '../../context.js';
-import { toast } from '../../components/cca-toast.js';
-import { getLogger } from '../../services/log-service.js';
+import { getContext } from '../context.js';
+import { toast } from './cca-toast.js';
+import { getLogger } from '../services/log-service.js';
 import {
   addConnectSrcOrigins,
   buildCspCurl,
@@ -34,9 +34,9 @@ import {
   removeConnectSrcOrigins,
   scriptSrcAllowsEval,
   setUnsafeEval
-} from '../../services/csp-policy.js';
+} from '../services/csp-policy.js';
 
-const log = getLogger('plugins/design-mgmt/csp-check');
+const log = getLogger('components/cca-csp-check');
 
 /**
  * What a violation report tells us, kept only long enough to name the host in the copy.
@@ -50,8 +50,12 @@ interface ViolationEventLike {
 }
 
 /**
- * Checks the Content-Security-Policy in force against what git sync actually needs, and offers to
- * extend it — a toggle, not a one-way write (#34).
+ * Checks the Content-Security-Policy in force against the origins a feature actually needs, and
+ * offers to extend it — a toggle, not a one-way write (#34).
+ *
+ * Used twice, and the copy comes from the caller because the diagnosis reads differently each
+ * time: git sync on the version-control screen (#34), and single sign-on on the identity-provider
+ * screen (#149), whose origins are three endpoints that need not share a host.
  *
  * THE PROBLEM IT PREVENTS. CouchDB serves `/_utils/` with `default-src 'self'` and no
  * `connect-src`, so the browser refuses every cross-origin request *before dispatching it*. Git
@@ -60,13 +64,15 @@ interface ViolationEventLike {
  * "Failed to fetch" with **nothing in the network tab**, because no request was ever made. This
  * component detects that before it bites.
  *
- * WHY IT LIVES ON THE VERSION-CONTROL SCREEN. The required origins are the configured git
- * accounts' own hosts, and this is the screen that has them; the operator setting up git sync is
- * the person the question is for.
+ * WHY IT LIVES ON THE SCREEN THAT CONFIGURES THE THING. The required origins are computed from
+ * what the operator configured, and each screen already holds that; the person setting the feature
+ * up is the person the question is for. Hence `origins` as a property rather than a fetch here.
  *
  * TWO SEPARATE OFFERS, NEVER ONE. Widening `connect-src` and allowing `script-src 'unsafe-eval'`
  * are different decisions with different consequences, so they are different switches. Folding
- * the second into the first would widen an operator's script policy without ever saying so.
+ * the second into the first would widen an operator's script policy without ever saying so. The
+ * second is opt-in per screen (`view-tester`): only the view editor needs `unsafe-eval`, and an
+ * identity-provider screen offering it would be inviting a change nothing there requires.
  *
  * DEGRADES.
  *  - **SPA mode** — hidden entirely. The policy comes from whoever serves the page, not from
@@ -132,12 +138,40 @@ export class CcaCspCheck extends LitElement {
   `;
 
   /**
-   * The origins git sync needs to reach, computed by the parent from its git accounts
-   * (`requiredGitOrigins`). A property rather than a fetch of its own: the screen that hosts this
-   * has already loaded the accounts, and a second read would only invent a way for the two to
+   * The origins the feature needs to reach, computed by the parent from what it has configured
+   * (`requiredGitOrigins`, `requiredIdpOrigins`). A property rather than a fetch of its own: the
+   * screen that hosts this has already loaded them, and a second read would only invent a way for the two to
    * disagree.
    */
   @property({ attribute: false }) origins: string[] = [];
+
+  /**
+   * What the origins are for, as a noun phrase that reads inside a sentence — "git sync",
+   * "single sign-on". Every line of copy here names it, because "this page cannot reach
+   * accounts.google.com" is a fact the reader can only act on once they know which feature it
+   * breaks.
+   */
+  @property({ attribute: false }) subject = 'this page';
+
+  /**
+   * How the block presents to a user who does not know the policy is the cause — the sentence that
+   * turns "connect-src is missing an origin" into the symptom they have already seen. Caller-
+   * supplied because it differs: git sync fails at "Failed to fetch", sign-in fails at the token
+   * exchange, and both do it with nothing in the network tab.
+   */
+  @property({ attribute: false }) blockedSymptom =
+    'those requests fail before the browser sends them, with nothing in the network tab';
+
+  /** Shown instead of the switch when nothing is configured yet, so there is nothing to allow. */
+  @property({ attribute: false }) emptyMessage =
+    'Nothing is configured yet that would need a cross-origin connection.';
+
+  /**
+   * Whether to also offer `script-src 'unsafe-eval'`. Off unless a screen asks: only the view
+   * editor's Run Test needs it, and offering it elsewhere would invite a change nothing there
+   * requires.
+   */
+  @property({ type: Boolean, attribute: 'view-tester' }) viewTester = false;
 
   /** The live header, or `null` for "the server sends none". `undefined` until the read lands. */
   @state() private _policy: string | null | undefined = undefined;
@@ -192,8 +226,8 @@ export class CcaCspCheck extends LitElement {
     try {
       this._policy = await getContext().csp.readUtilsPolicy();
     } catch (err: unknown) {
-      // Not surfaced to the user: failing to read the policy is not itself a problem with git
-      // sync, and a toast here would fire on every visit behind a proxy that answers HEAD oddly.
+      // Not surfaced to the user: failing to read the policy is not itself a problem with the
+      // feature, and a toast here would fire on every visit behind a proxy that answers HEAD oddly.
       log.debug('Could not read the /_utils Content-Security-Policy', err as Error);
       this._policy = null;
     }
@@ -223,13 +257,15 @@ export class CcaCspCheck extends LitElement {
     }
   }
 
-  /** Adds (or removes again) the git origins on `connect-src`. Public for the switch and tests. */
-  async setGitAccess(allow: boolean): Promise<void> {
+  /** Adds (or removes again) this screen's origins on `connect-src`. Public for the switch and tests. */
+  async setOriginAccess(allow: boolean): Promise<void> {
     const policy = this._policy;
     if (typeof policy !== 'string' || this.origins.length === 0) return;
     await this._write(
       allow ? addConnectSrcOrigins(policy, this.origins) : removeConnectSrcOrigins(policy, this.origins),
-      allow ? 'Content-Security-Policy now allows git sync.' : 'Git origins removed from the Content-Security-Policy.'
+      allow
+        ? `Content-Security-Policy now allows ${this.subject}.`
+        : `Removed those origins from the Content-Security-Policy.`
     );
   }
 
@@ -301,11 +337,9 @@ export class CcaCspCheck extends LitElement {
     `;
   }
 
-  private _renderGitAccess() {
+  private _renderOriginAccess() {
     if (this.origins.length === 0) {
-      return html`<p class="consequence" data-no-accounts>
-        No git accounts are connected yet, so there is nothing for the policy to allow.
-      </p>`;
+      return html`<p class="consequence" data-nothing-configured>${this.emptyMessage}</p>`;
     }
     // Permitted, but not by anything this component put there — a wildcard, a scheme source, a
     // host pattern the operator chose. There is nothing to offer and nothing we could take back
@@ -321,10 +355,10 @@ export class CcaCspCheck extends LitElement {
     return html`
       <div class="row">
         <wa-switch
-          data-git-access
+          data-origin-access
           ?checked=${this._managed}
           ?disabled=${this._busy}
-          @change=${(e: Event) => void this.setGitAccess((e.target as HTMLInputElement).checked)}
+          @change=${(e: Event) => void this.setOriginAccess((e.target as HTMLInputElement).checked)}
         ></wa-switch>
         <div>
           <div class="label">Let this page reach ${hosts}</div>
@@ -388,17 +422,16 @@ export class CcaCspCheck extends LitElement {
         <p class="consequence">
           ${blocked
             ? html`This page is served by CouchDB, and its policy refuses connections to
-                ${missing.join(', ')} before the browser sends them — git sync fails with "Failed
-                to fetch" and nothing appears in the network tab.`
+                ${missing.join(', ')} before the browser sends them — ${this.blockedSymptom}.`
             : html`This page is served by CouchDB, and its policy already allows the connections
-                git sync makes.`}
+                ${this.subject} makes.`}
           ${this._blockedHost
             ? html`The browser has already refused a request to
                 <code data-blocked-host>${this._blockedHost}</code> under this policy.`
             : nothing}
         </p>
         <pre class="policy" data-live-policy>${this._policy}</pre>
-        ${this._renderGitAccess()} ${this._renderViewTester()}
+        ${this._renderOriginAccess()} ${this.viewTester ? this._renderViewTester() : nothing}
         ${this._error ? html`<p class="consequence error" data-error>${this._error}</p>` : nothing}
       </wa-callout>
     `;

@@ -496,11 +496,40 @@ with `curl -i -X POST <token_endpoint> -H "Origin: <app origin>" ...` and look f
 `Access-Control-Allow-Origin` in the response), but the browser refused to hand the response to
 the page.
 
-If you're running the [drop-in install](#drop-in-install-_utils) or otherwise serving this app
-behind CouchDB's own CSP, add the IdP's hosts (authorize, token, well-known, and JWKS endpoints)
-to `connect-src` too, the same way [git sync's CSP note](#git-sync-needs-one-more-change-couchdbs-content-security-policy)
-above adds `api.github.com` — CORS is the IdP's permission to be called; CSP is this page's
-permission to call it, and both have to allow it.
+### CouchDB's own CSP has to allow the IdP too
+
+CORS is the IdP's permission to be called. CSP is this page's permission to call it. Both have to
+allow it, and on the [drop-in install](#drop-in-install-_utils) the second one is refused by
+default — CouchDB serves `/_utils` with no `connect-src` at all, so the browser blocks the call
+before it is made and nothing appears in the network tab.
+
+You do not have to work this out by hand. The identity-provider screen reads the policy CouchDB is
+actually serving and, when it refuses a host your providers need, offers a switch that adds it to
+`connect-src` — the same offer [git sync makes](#git-sync-needs-one-more-change-couchdbs-content-security-policy)
+above. Deleting a provider takes its origins back out again, minus any that another provider still
+needs. Both are hidden entirely in SPA mode, where the policy belongs to whoever serves the page
+rather than to CouchDB, so neither the diagnosis nor the fix would be true.
+
+**Which hosts.** The ones the browser *fetches*: the discovery document, `jwks_uri` and
+`token_endpoint`. They need not be the same host — Google's are three:
+
+    issuer          https://accounts.google.com
+    jwks_uri        https://www.googleapis.com
+    token_endpoint  https://oauth2.googleapis.com
+
+so a policy built from the issuer alone permits one of three and sign-in dies at the token
+exchange. The three origins are therefore recorded on each provider when it is **registered or
+refreshed**, which is when its discovery document is in hand.
+
+The authorize and end-session endpoints are deliberately *not* added. Those are full-page
+redirects, and no `connect-src` governs a navigation; listing them would widen the policy for
+requests that never happen.
+
+**A provider registered before this feature existed** contributes only the origin of its
+well-known URL, because the other two cannot be recovered without re-reading discovery. Refresh it
+once and all three are recorded. (An entry old enough to predate the slim `[oidc]` format recovers
+all three immediately — it still carries the endpoints in its stored copy of the discovery
+document.)
 
 ### Register two URIs, not one: sign-in and sign-out
 
