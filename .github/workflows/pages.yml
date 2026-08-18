@@ -47,13 +47,13 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Explicitly main, which is where release.yml just pushed the bump —
           # and not `workflow_run.head_sha`, which is the commit release.yml
           # STARTED from, one commit before the version it released.
           ref: main
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
