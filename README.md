@@ -74,9 +74,9 @@ Two supported deployments, both from the same `dist/`:
   origin as the database, with nothing to configure. This is the primary target (D4). It also
   destroys the Fauxton your server shipped with, so read the rollback before you need it.
 - **Static SPA** — host `dist/` anywhere (GitHub Pages, Cloudflare Pages, a bucket) and point it at
-  a CouchDB. This one needs CORS on CouchDB. If the app and the database are on different *sites*
+  a CouchDB. This one needs CORS on CouchDB. If the app and the database are on different _sites_
   — not merely different ports — it additionally needs `[chttpd_auth] same_site = none` **and**
-  HTTPS. Over plain HTTP that setting makes the browser discard the session cookie *silently*: the
+  HTTPS. Over plain HTTP that setting makes the browser discard the session cookie _silently_: the
   login reports success and the very next request is anonymous.
 
 [docs/install.md](docs/install.md) has the actual steps for each case, the CouchDB config snippets,
@@ -98,7 +98,7 @@ At :5173 the app is in **SPA mode** — it detects CouchDB by probing its own or
 asks you for a server URL. Log in there with `admin`/`password` (server admin) or `demo`/`password`
 (a CouchDB-native non-admin — the account to reach for when checking the degraded paths above).
 
-The Keycloak sign-in button will *not* appear at :5173: IdP discovery runs once, at boot, against
+The Keycloak sign-in button will _not_ appear at :5173: IdP discovery runs once, at boot, against
 the app's own origin — which is the dev server, not CouchDB. To exercise it — and the drop-in
 generally — build and copy `dist/` into the CouchDB container, then open
 <http://localhost:5984/_utils/>:
@@ -114,7 +114,7 @@ socket and no docker-in-docker feature, so `docker` is simply absent. The script
 front and stops rather than half-finishing. Either run the script **on the host**, or pass
 `--no-docker` in here to produce the tarball alone.
 
-That CouchDB is a single node, so anything comparing configuration *across* nodes has nothing to
+That CouchDB is a single node, so anything comparing configuration _across_ nodes has nothing to
 show. `scripts/cluster-up.sh` brings up a separate three-node cluster on 15984/25984/35984 for
 those screens — opt-in, alongside `:5984` rather than instead of it. See
 [CONTRIBUTING.md](CONTRIBUTING.md#a-multi-node-cluster).
@@ -148,11 +148,11 @@ in the install guide. SPA installs are unaffected.
    choice (`CREDENTIAL_MODE_COPY` in `src/services/git/git-credential-store.ts` — kept as the
    single source so this table cannot drift from what the app actually says):
 
-   | Option | Label shown in the UI | What it means |
-   |---|---|---|
-   | `none` (default) | Do not store (recommended) | Held in memory for this tab only. You re-enter the token each session. |
-   | `indexeddb` | This browser | Stored in plain text in this browser profile, for this origin. Anyone with the profile — or any script injected into this origin — can read it. |
-   | `couchdb` | On the CouchDB server | Stored in plain text in the `couchcompanion` database, so it follows you between browsers and is readable by every server admin. |
+   | Option           | Label shown in the UI      | What it means                                                                                                                                   |
+   | ---------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `none` (default) | Do not store (recommended) | Held in memory for this tab only. You re-enter the token each session.                                                                          |
+   | `indexeddb`      | This browser               | Stored in plain text in this browser profile, for this origin. Anyone with the profile — or any script injected into this origin — can read it. |
+   | `couchdb`        | On the CouchDB server      | Stored in plain text in the `couchcompanion` database, so it follows you between browsers and is readable by every server admin.                |
 
 ### Who can do what
 
@@ -181,7 +181,7 @@ in the install guide. SPA installs are unaffected.
   delete it from the git repository as well.
 - **Sync refuses to overwrite in the direction that would lose data.** A document changed only in
   CouchDB since the last sync will not be overwritten by a pull from git; a document changed only
-  in git will not be overwritten by a push to CouchDB. Only when *both* sides changed does sync
+  in git will not be overwritten by a push to CouchDB. Only when _both_ sides changed does sync
   stop and record a conflict for you to resolve — it never guesses which side should win.
 - **The repository-side listing caps at 50 design documents.** Each file it reads is its own
   GitHub API call against a rate limit the app doesn't control, so a repository with more than 50

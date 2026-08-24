@@ -28,10 +28,11 @@ Software Foundation project, and Apache IDs are assigned when a donation is
 accepted and the initial committer list is established. Nobody here holds one
 by virtue of this project today.
 
-| Name | GitHub | Apache ID | Focus |
-| --- | --- | --- | --- |
-| Stephan H. Wissel | [@stephan-wissel](https://github.com/stephan-wissel) | — | Project lead; original author. Architecture, CouchDB integration, auth and OIDC, replication and topology, design-doc git sync, packaging. |
-| Catherine Barrientos | [@catherine-barrientos](https://github.com/catherine-barrientos) | — | UI components, review. |
+| Name                     | GitHub                                                   | Apache ID | Focus                                                                        |
+| ------------------------ | -------------------------------------------------------- | --------- | ---------------------------------------------------------------------------- |
+| Stephan H. Wissel        | [@stwissel](https://github.com/stwissel)                 | —         | Project lead; original author. Architecture, CouchDB integration, packaging. |
+| Catherine Barrientos     | [@ykaterina](https://github.com/ykaterina)               | —         | UI components, auth and OIDC, GitHub integration, Design documents, review.  |
+| Christopher Erick Espino | [@christopherErick](https://github.com/christopherErick) | -         | replication and topology                                                     |
 
 ## Provenance of the code
 
@@ -53,7 +54,7 @@ work for HCL America Inc., which holds copyright in the original work. See
   written by committers — self-merging without review is not the norm here.
 - **Runs the gate.** CI has never executed on the current GitHub Enterprise
   host, which has no runner for it, so until the repository moves to a host
-  with runners a committer's own `scripts/check.sh` run *is* the merge gate.
+  with runners a committer's own `scripts/check.sh` run _is_ the merge gate.
   Merging on an unverified tree is the one thing that would quietly undo the
   test suite's value.
 - **Keeps the decision record honest.** When implementation disagrees with a
