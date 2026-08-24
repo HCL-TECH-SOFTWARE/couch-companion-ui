@@ -18,22 +18,35 @@
 # Deploys dist/ to GitHub Pages. Runs ONLY on github.com (guarded per job) —
 # on GHE both jobs skip; the workflow resumes working after the repo moves back.
 #
-# Released versions only, and only after release.yml has finished (#155). It used
-# to deploy every push to main, which published whatever was on the branch rather
-# than what was last released.
+# Released versions only (#155). It used to deploy every push to main, which
+# published whatever was on the branch rather than what was last released.
 #
-# `workflow_run` and not the `release` event, for two reasons. It is what actually
-# orders the two: this cannot start until release.yml has finished pushing the
-# version bump, so the deployed site carries the version that was just released.
-# And release.yml publishes with GITHUB_TOKEN, which deliberately does not start
-# workflow runs from the repository events it raises — a `release: published`
-# trigger here would simply never fire. workflow_run is not suppressed that way.
+# A release can be cut two ways, and each raises a DIFFERENT event here. Both are
+# listened for, because listening for only one is how this workflow spent every
+# release so far deploying nothing:
+#
+#   release.yml    `workflow_run`, not `release`. That publishes with
+#                  GITHUB_TOKEN, and GitHub deliberately does not start workflow
+#                  runs from the repository events such a token raises — a
+#                  `release: published` trigger would never fire for it.
+#                  workflow_run is not suppressed that way, and it is also what
+#                  orders the two: this cannot start until release.yml has
+#                  finished pushing the version bump, so the deployed site
+#                  carries the version that was just released.
+#
+#   by hand        `release`. The UI, or `gh release create` under a personal
+#                  token, never runs release.yml at all, so workflow_run stays
+#                  silent. The actor is a person rather than GITHUB_TOKEN, so
+#                  nothing suppresses `release` — validate-release.yml already
+#                  demonstrates it firing on exactly this path.
 name: Pages
 
 on:
   workflow_run:
     workflows: [Release]
     types: [completed]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -43,17 +56,28 @@ jobs:
   build:
     # A failed release must not deploy: `types: [completed]` includes failure and
     # cancellation, and the conclusion is the only thing that separates them.
+    #
+    # Scoped to the workflow_run path on purpose. `release` and
+    # `workflow_dispatch` carry no workflow_run object, so an unconditional
+    # comparison reads as '' != 'success' and skips both jobs — which is what a
+    # manual run of this workflow did before the event_name test was added.
     if: >-
       github.server_url == 'https://github.com' &&
-      github.event.workflow_run.conclusion == 'success'
+      (github.event_name != 'workflow_run' ||
+       github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          # Explicitly main, which is where release.yml just pushed the bump —
-          # and not `workflow_run.head_sha`, which is the commit release.yml
-          # STARTED from, one commit before the version it released.
-          ref: main
+          # Which tree counts as "what was released" depends on the trigger:
+          #   workflow_run  main, where release.yml just pushed the bump — and
+          #                 NOT `workflow_run.head_sha`, which is the commit
+          #                 release.yml STARTED from, one before the version it
+          #                 released.
+          #   release       the tag itself. It is precisely what was released,
+          #                 and main may already have moved past it.
+          #   dispatch      main, this being a deliberate re-deploy of trunk.
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
