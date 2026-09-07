@@ -252,17 +252,21 @@ Mango editor`), a blank line, then the reasoning. Reference the issue.
 
 This project keeps its reasoning in the tree rather than in a wiki:
 
-- [docs/derivate-creation.md](docs/derivate-creation.md) — the design and
-  decision log, D1–D19, with the per-phase decisions that corrected it where
-  implementation disagreed with the plan.
-- [docs/plans/](docs/plans/) — each phase's plan and its record of what was
-  verified against live servers.
-- [docs/install.md](docs/install.md) — deployment, both modes.
+- [docs/install.md](docs/install.md) — deployment: the drop-in, the container
+  image and the SPA mode, with the CouchDB configuration each one needs.
+- The source itself. A decision that is not obvious from the code is recorded
+  next to the code it constrains, in a comment that says *why* rather than
+  restating *what*: `scripts/package.sh` on the archive layout,
+  `docker/Dockerfile` on the build context, `src/services/csp-policy.ts` on the
+  header it writes.
+
+Some of those comments cite a decision by identifier — `D13`, `spec §5`. Those
+name constraints from the design log kept with the upstream project, which this
+repository does not carry. Read them as the name of a constraint, not as a link.
 
 A change that contradicts a recorded decision should say so and update the
-record. That log is the reason a reviewer can tell an intentional constraint
-from an accident, and it is a large part of what makes this codebase
-transferable.
+record in the same commit. Being able to tell an intentional constraint from an
+accident is a large part of what makes this codebase transferable.
 
 ## Code of conduct
 
