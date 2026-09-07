@@ -17,13 +17,13 @@
  * under the License.
  */
 
-import { Linter, RuleTester } from 'eslint';
+import { RuleTester } from 'oxlint/plugins-dev';
 import { describe, expect, it } from 'vitest';
 
 import rule, {
   ENTRY_STYLESHEETS,
   collectDeclaredTokens,
-} from '../eslint-rules/no-undefined-wa-token.js';
+} from '../lint-rules/no-undefined-wa-token.js';
 import { GRAPH_TOKENS } from '../src/plugins/server-mgmt/topology-graph.js';
 
 // vitest runs with `globals: false` (vitest.config.ts), so RuleTester cannot find
@@ -97,45 +97,19 @@ describe('token names held outside CSS', () => {
   });
 });
 
-describe('report location', () => {
-  // A `static styles = css`...`` block is one template literal spanning hundreds of lines.
-  // Reporting the node would point every violation at line 1. The offsets must resolve to the
-  // line the token is actually on.
-  it('points at the token, not at the top of the template literal', () => {
-    const code = ['const s = css`', '  div {', '    border-radius: var(--wa-border-radius-medium);', '  }', '`;'].join(
-      '\n',
-    );
+// The two report-location fixtures. Their expected columns are DERIVED from the source rather
+// than hardcoded, so the cases keep asserting "points at `var(`" rather than "points at 20".
+const IN_TEMPLATE = ['const s = css`', '  div {', '    border-radius: var(--wa-border-radius-medium);', '  }', '`;'].join(
+  '\n',
+);
+const IN_TEMPLATE_COLUMN = IN_TEMPLATE.split('\n')[2].indexOf('var(--wa-border-radius-medium') + 1;
 
-    const messages = new Linter().verify(code, {
-      plugins: { cca: { rules: { 'no-undefined-wa-token': rule } } },
-      rules: { 'cca/no-undefined-wa-token': 'error' },
-      languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
-    });
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].line).toBe(3);
-    expect(code.split('\n')[2].slice(messages[0].column - 1)).toMatch(/^var\(--wa-border-radius-medium/);
-    expect(messages[0].message).toContain("'--wa-border-radius-medium' is not declared");
-  });
-
-  // The literal's cooked value collapses each `\t` to one character, while its source spans
-  // two. Scanning the cooked value would report the column two places early.
-  it('points at the token inside a string literal, past an escape sequence', () => {
-    const code = String.raw`const s = "\t\tcolor:var(--wa-border-radius-medium)";`;
-
-    const messages = new Linter().verify(code, {
-      plugins: { cca: { rules: { 'no-undefined-wa-token': rule } } },
-      rules: { 'cca/no-undefined-wa-token': 'error' },
-      languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
-    });
-
-    expect(messages).toHaveLength(1);
-    expect(code.slice(messages[0].column - 1)).toMatch(/^var\(--wa-border-radius-medium/);
-  });
-});
+const PAST_ESCAPE = String.raw`const s = "\t\tcolor:var(--wa-border-radius-medium)";`;
+const PAST_ESCAPE_COLUMN = PAST_ESCAPE.indexOf('var(--wa-border-radius-medium') + 1;
 
 const ruleTester = new RuleTester({
-  languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
+  eslintCompat: true,
+  languageOptions: { sourceType: 'module' },
 });
 
 // This is the guard observed to FAIL, not merely to pass (issue #718, AC #2). A rule whose
@@ -159,6 +133,25 @@ ruleTester.run('no-undefined-wa-token', rule, {
     { code: 'const s = css`div { background: var(${p}); }`;' },
   ],
   invalid: [
+    // A `static styles = css`...`` block is one template literal spanning hundreds of lines.
+    // Reporting the node would point every violation at line 1. The offsets must resolve to the
+    // line the token is actually on.
+    {
+      code: IN_TEMPLATE,
+      errors: [
+        {
+          message: /'--wa-border-radius-medium' is not declared/,
+          line: 3,
+          column: IN_TEMPLATE_COLUMN,
+        },
+      ],
+    },
+    // The literal's cooked value collapses each `\t` to one character, while its source spans
+    // two. Scanning the cooked value would report the column two places early.
+    {
+      code: PAST_ESCAPE,
+      errors: [{ message: /--wa-border-radius-medium/, line: 1, column: PAST_ESCAPE_COLUMN }],
+    },
     {
       code: 'const s = css`div { border-radius: var(--wa-border-radius-medium); }`;',
       errors: [{ messageId: 'undefinedToken', data: { token: '--wa-border-radius-medium' } }],

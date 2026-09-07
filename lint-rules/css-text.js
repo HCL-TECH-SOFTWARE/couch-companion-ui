@@ -36,8 +36,8 @@
  * Never scan `Literal.value`: that is the *cooked* string, where an escape sequence collapses to
  * one character and shifts every offset after it. `test/no-undefined-wa-token.test.ts` pins this.
  *
- * @param {import('eslint').SourceCode} sourceCode
- * @param {import('estree').Node} node a TemplateElement, or a string Literal
+ * @param sourceCode the linter's SourceCode, for `getText`
+ * @param node a TemplateElement, or a string Literal
  * @returns {{ text: string, base: number }}
  */
 export function cssTextOf(sourceCode, node) {
@@ -49,7 +49,7 @@ export function cssTextOf(sourceCode, node) {
 /**
  * A visitor that hands `check` every node CSS can live in.
  *
- * @param {(node: import('estree').Node) => void} check
+ * @param check receives each TemplateElement or string Literal that may hold CSS
  */
 export function visitCssText(check) {
   return {

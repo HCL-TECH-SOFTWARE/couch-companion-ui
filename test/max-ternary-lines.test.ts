@@ -17,25 +17,23 @@
  * under the License.
  */
 
-import { Linter } from 'eslint';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { RuleTester } from 'oxlint/plugins-dev';
 import { describe, expect, it } from 'vitest';
 
-import rule from '../eslint-rules/max-ternary-lines.js';
+import rule from '../lint-rules/max-ternary-lines.js';
 
-type Options = { maxLines: number };
-
-function lint(code: string, options?: Options) {
-  return new Linter().verify(code, {
-    plugins: { cca: { rules: { 'max-ternary-lines': rule } } },
-    rules: { 'cca/max-ternary-lines': options ? ['warn', options] : 'warn' },
-    languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
-  });
-}
+// vitest runs with `globals: false` (vitest.config.ts), so RuleTester cannot find describe/it.
+RuleTester.describe = describe;
+RuleTester.it = it;
+RuleTester.itOnly = it.only;
 
 /**
  * A ternary whose consequent is a string concatenation padded out so the whole expression is
- * exactly `lines` tall. Must stay valid JS — a fixture that fails to parse yields a `fatal`
- * message and would pass a naive "did it report?" assertion for entirely the wrong reason.
+ * exactly `lines` tall. Must stay valid JS — a fixture that fails to parse yields a parse error
+ * and would pass a naive "did it report?" assertion for entirely the wrong reason.
  */
 function ternaryOfHeight(lines: number): string {
   const consequent = lines - 2; // the `const x = cond` and `  : b;` lines bracket it
@@ -43,87 +41,103 @@ function ternaryOfHeight(lines: number): string {
   return ['const x = cond', "  ? 'x' +", ...middle, "    'x'", '  : b;'].join('\n');
 }
 
-describe('cca/max-ternary-lines', () => {
-  it('ignores a ternary that fits on one line', () => {
-    expect(lint('const x = cond ? a : b;')).toEqual([]);
+/** The common Lit shape: a big html`` template as a branch. */
+function templateBranch(name: string): string {
+  return ['html`', `  <div>${name}</div>`, '  <span>filler</span>', '  <span>filler</span>', '`'].join('\n');
+}
+
+const NESTED = [
+  'const x = a',
+  "  ? 'x' +",
+  ...Array.from({ length: 7 }, () => "    'x' +"),
+  "    'x'",
+  '  : b', // the inner ternary starts here...
+  "    ? 'y' +",
+  ...Array.from({ length: 10 }, () => "      'y' +"),
+  "      'y'",
+  '    : c;', // ...and ends here — 14 lines, over the limit on its own.
+].join('\n');
+
+const TAGGED_TEMPLATES = `const x = cond\n  ? ${templateBranch('yes')}\n  : ${templateBranch('no')};`;
+
+// The fixtures carry the whole point of several cases below — "one line over the limit" means
+// nothing if the generator quietly produces something else. Pinned separately so a broken
+// generator fails loudly here rather than silently weakening the cases.
+describe('fixtures', () => {
+  it('builds a ternary of exactly the requested height', () => {
+    expect(ternaryOfHeight(10).split('\n')).toHaveLength(10);
+    expect(ternaryOfHeight(11).split('\n')).toHaveLength(11);
   });
 
-  it('ignores a ternary exactly at the limit', () => {
-    const code = ternaryOfHeight(10);
-    expect(code.split('\n')).toHaveLength(10);
-    expect(lint(code)).toEqual([]);
+  it('builds a nested fixture whose INNER ternary also breaches the limit', () => {
+    // Otherwise the outermost-only guard is never exercised and the case passes with it deleted.
+    expect(NESTED.split('\n')).toHaveLength(24);
+    const innerHeight = NESTED.split('\n').length - NESTED.split('\n').indexOf('  : b');
+    expect(innerHeight).toBeGreaterThan(10);
   });
 
-  // The boundary is the whole rule: "more than 10 lines". 10 is fine, 11 is not.
-  it('reports a ternary one line over the limit', () => {
-    const code = ternaryOfHeight(11);
-    expect(code.split('\n')).toHaveLength(11);
-
-    const messages = lint(code);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].ruleId).toBe('cca/max-ternary-lines');
-    expect(messages[0].message).toContain('spans 11 lines (limit 10)');
+  it('builds a tagged-template fixture over the limit', () => {
+    expect(TAGGED_TEMPLATES.split('\n').length).toBeGreaterThan(10);
   });
+});
 
-  it('warns rather than errors, so it cannot fail the build', () => {
-    const messages = lint(ternaryOfHeight(11));
-    expect(messages[0].severity).toBe(1);
+// The severity is a property of the wiring, not of the rule module: this rule is a smell, not a
+// defect, and must not be able to fail the build while the backlog stands. Asserted against the
+// config itself because that is where the claim actually lives.
+describe('wiring', () => {
+  it('is configured at warn, not error, so it cannot fail the build', () => {
+    // Not `import.meta.url` — vitest runs this suite under happy-dom, where it is not a file: URL.
+    const config = readFileSync(resolve(process.cwd(), '.oxlintrc.json'), 'utf8');
+    expect(config).toMatch(/"cca\/max-ternary-lines":\s*\[\s*"warn"/);
   });
+});
 
-  it('points at the start of the ternary', () => {
-    const messages = lint(ternaryOfHeight(11));
-    expect(messages[0].line).toBe(1);
-  });
+const ruleTester = new RuleTester({
+  eslintCompat: true,
+  languageOptions: { sourceType: 'module' },
+});
 
-  // A nested ternary is contained by its parent and so can never be taller than it. Reporting both
-  // would mean two warnings for one expression, pointing at overlapping regions of the file.
-  //
-  // The fixture has to be built so the INNER ternary independently breaches the limit too —
-  // otherwise the guard is never exercised and this test passes with the guard deleted.
-  it('reports only the outermost ternary of a nested chain', () => {
-    const code = [
-      'const x = a',
-      "  ? 'x' +",
-      ...Array.from({ length: 7 }, () => "    'x' +"),
-      "    'x'",
-      '  : b', // the inner ternary starts here...
-      "    ? 'y' +",
-      ...Array.from({ length: 10 }, () => "      'y' +"),
-      "      'y'",
-      '    : c;', // ...and ends here — 14 lines, over the limit on its own.
-    ].join('\n');
-
-    const messages = lint(code);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].line).toBe(1); // the outer one, not the inner
-    expect(messages[0].message).toContain(`spans ${code.split('\n').length} lines`);
-  });
-
-  // The common Lit shape: two big html`` templates as the branches. The ternary is the thing being
-  // measured, not the template literals it happens to contain.
-  it('measures a ternary whose branches are tagged templates', () => {
-    const branch = (name: string) =>
-      ['html`', `  <div>${name}</div>`, '  <span>filler</span>', '  <span>filler</span>', '`'].join('\n');
-    const code = `const x = cond\n  ? ${branch('yes')}\n  : ${branch('no')};`;
-    const height = code.split('\n').length;
-    expect(height).toBeGreaterThan(10);
-
-    const messages = lint(code);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].message).toContain(`spans ${height} lines`);
-  });
-
-  it('honours a custom maxLines', () => {
-    const code = ternaryOfHeight(11);
-    expect(lint(code, { maxLines: 20 })).toEqual([]);
-
-    const messages = lint(code, { maxLines: 5 });
-    expect(messages).toHaveLength(1);
-    expect(messages[0].message).toContain('spans 11 lines (limit 5)');
-  });
-
-  it('does not report non-ternary code that merely spans many lines', () => {
-    const code = ['function f() {', ...Array.from({ length: 20 }, (_, i) => `  const v${i} = ${i};`), '}'].join('\n');
-    expect(lint(code)).toEqual([]);
-  });
+// The rule must be observed to REPORT, not merely to pass. A rule whose matcher silently finds
+// nothing would sail through a suite made only of `valid` cases — the vacuity hole #718 found.
+ruleTester.run('max-ternary-lines', rule, {
+  valid: [
+    { name: 'a ternary that fits on one line', code: 'const x = cond ? a : b;' },
+    { name: 'a ternary exactly at the limit', code: ternaryOfHeight(10) },
+    {
+      name: 'non-ternary code that merely spans many lines',
+      code: ['function f() {', ...Array.from({ length: 20 }, (_, i) => `  const v${i} = ${i};`), '}'].join('\n'),
+    },
+    {
+      name: 'a tall ternary under a raised custom limit',
+      code: ternaryOfHeight(11),
+      options: [{ maxLines: 20 }],
+    },
+  ],
+  invalid: [
+    {
+      // The boundary is the whole rule: "more than 10 lines". 10 is fine, 11 is not.
+      name: 'a ternary one line over the limit, reported at its start',
+      code: ternaryOfHeight(11),
+      errors: [{ message: /spans 11 lines \(limit 10\)/, line: 1 }],
+    },
+    {
+      // A nested ternary is contained by its parent and so can never be taller than it. Reporting
+      // both would mean two warnings for one expression, pointing at overlapping regions.
+      name: 'only the outermost ternary of a nested chain',
+      code: NESTED,
+      errors: [{ message: new RegExp(`spans ${NESTED.split('\n').length} lines`), line: 1 }],
+    },
+    {
+      // The ternary is the thing being measured, not the template literals it happens to contain.
+      name: 'a ternary whose branches are tagged templates',
+      code: TAGGED_TEMPLATES,
+      errors: [{ message: new RegExp(`spans ${TAGGED_TEMPLATES.split('\n').length} lines`) }],
+    },
+    {
+      name: 'a lowered custom maxLines',
+      code: ternaryOfHeight(11),
+      options: [{ maxLines: 5 }],
+      errors: [{ message: /spans 11 lines \(limit 5\)/ }],
+    },
+  ],
 });

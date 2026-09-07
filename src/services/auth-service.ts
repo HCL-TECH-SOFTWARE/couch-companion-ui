@@ -26,7 +26,7 @@ import { getLogger } from "./log-service.js";
 
 const log = getLogger("services/auth-service");
 
-// The two session-storage keys this file owns (see eslint SESSION_KEY_LITERALS).
+// The two session-storage keys this file owns (see cca/no-session-key-literals).
 const USER_KEY = "cca_user";
 const TOKEN_KEY = "cca_token";
 

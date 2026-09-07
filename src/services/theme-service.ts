@@ -59,7 +59,7 @@ export interface ThemeDefinition {
  * icon too. Order is the order the picker lists them.
  *
  * A theme's stylesheet does **not** belong in `ENTRY_STYLESHEETS` in
- * `eslint-rules/no-undefined-wa-token.js`, even though it is a stylesheet the app loads. That list
+ * `lint-rules/no-undefined-wa-token.js`, even though it is a stylesheet the app loads. That list
  * defines which tokens component code may reference, and component code renders under whichever
  * theme is active — so it may only name tokens *every* theme declares. `enchanted` is the reason
  * this is worth stating: it adds 93 palette tokens the Web Awesome themes have no equivalent for.

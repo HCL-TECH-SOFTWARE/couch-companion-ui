@@ -34,7 +34,6 @@ import { cssTextOf, visitCssText } from './css-text.js';
 /** Matches a declaration (`--cca-x:`) and a reference (`var(--cca-x)`) alike. */
 const CCA_PROPERTY = /--cca-[a-z0-9-]*/g;
 
-/** @type {import('eslint').Rule.RuleModule} */
 const rule = {
   meta: {
     type: 'problem',

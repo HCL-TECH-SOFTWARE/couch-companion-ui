@@ -33,7 +33,7 @@
  *     app has no business sending or receiving it — the PKCE exchange authenticates with the
  *     `code_verifier` alone.
  *
- * The ESLint override that lets this file call `fetch` is declared in `eslint.config.js`
+ * The oxlint override that lets this file call `fetch` is declared in `.oxlintrc.json`
  * alongside the other two. Adding a fourth needs the same justification these three carry.
  */
 

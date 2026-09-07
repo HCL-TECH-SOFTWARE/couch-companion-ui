@@ -46,7 +46,6 @@ function isNestedInTernary(node) {
   return false;
 }
 
-/** @type {import('eslint').Rule.RuleModule} */
 const rule = {
   meta: {
     type: 'suggestion',

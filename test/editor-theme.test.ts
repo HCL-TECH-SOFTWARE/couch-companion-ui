@@ -19,7 +19,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { collectDeclaredTokens } from '../eslint-rules/no-undefined-wa-token.js';
+import { collectDeclaredTokens } from '../lint-rules/no-undefined-wa-token.js';
 import {
   EDITOR_COLOR_TOKENS,
   EDITOR_THEME_ID,

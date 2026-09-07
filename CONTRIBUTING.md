@@ -141,7 +141,7 @@ needs; JWT sign-in against the cluster is not set up.
 One command decides whether a patch is mergeable:
 
 ```
-npm run check      # eslint + vitest + tsc --noEmit
+npm run check      # oxlint + vitest + tsc --noEmit
 ```
 
 `.github/workflows/ci.yml` runs exactly that, plus `npx vite build` and
@@ -194,9 +194,14 @@ passes after.
 
 ## Code conventions
 
-Most of these are enforced by ESLint, including four rules custom to this repo
-in `eslint-rules/`. The rule exists in each case because the mistake it catches
-is invisible in review and loud in production.
+Most of these are enforced by [oxlint](https://oxc.rs/docs/guide/usage/linter),
+including seven rules custom to this repo in `lint-rules/`, loaded as a plugin via
+`jsPlugins` in `.oxlintrc.json`. The rule exists in each case because the mistake it
+catches is invisible in review and loud in production.
+
+The config is deliberately minimal: every oxlint category is switched off, so the only
+rules that run are the ones listed there. Adopting a preset is #703 — it would surface a
+large pre-existing backlog and bury these guardrails.
 
 | Rule | What it enforces |
 | --- | --- |
@@ -204,6 +209,14 @@ is invisible in review and loud in production.
 | `cca/no-hardcoded-typography` | No literal `font-family`, `font-size`, or `line-height` values — use the tokens. (`letter-spacing` is exempt; Web Awesome ships no token for it.) |
 | `cca/no-cca-custom-property` | The retired `--cca-*` namespace stays retired. |
 | `cca/max-ternary-lines` | Warns past ten lines of ternary; extract instead. |
+| `cca/no-session-key-literals` | The `cca_token` / `cca_user` storage keys may only be named in `auth-service.ts`. |
+| `cca/service-layer-only` | Only services may call `ApiClient.request()`; components go through a service. |
+| `cca/no-bracket-request-access` | No `api['request']` bracket access — it was a workaround for `private`. |
+
+The last three encode the layering **component -> service -> ApiClient -> network**, where
+nothing may skip a layer. Their exemptions — the three sanctioned HTTP boundaries, the logging
+facade, and `auth-service.ts` — are declared in `overrides` in `.oxlintrc.json`, each with a
+comment saying why that file is allowed what it is allowed.
 
 Beyond the linter:
 
