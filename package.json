@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "lint": "eslint src",
+    "lint": "oxlint --config .oxlintrc.json src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run lint && npm run test && npm run typecheck",
@@ -30,18 +30,16 @@
   "devDependencies": {
     "@open-wc/testing": "^5.0.0",
     "@types/d3": "^7.4.3",
-    "@types/node": "^26.2.0",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@types/node": "^26.5.0",
+    "@vitest/coverage-v8": "^5.0.0",
     "@web/test-runner-commands": "^1.0.1",
     "esbuild": "^0.28.2",
-    "eslint": "^10.9.0",
-    "globals": "^17.11.0",
-    "happy-dom": "^20.11.6",
+    "happy-dom": "^20.14.0",
+    "oxlint": "^1.82.0",
     "prettier": "^3.9.6",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.67.0",
+    "typescript": "^7.0.2",
     "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   },
   "allowScripts": {
     "fsevents@2.3.3": true,
