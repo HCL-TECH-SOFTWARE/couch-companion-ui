@@ -27,10 +27,18 @@
 FROM couchdb:latest
 
 ARG VERSION=0.0.0-dev
+# `source` is not decoration. It is the label GHCR reads to link the published
+# package to a repository, and a linked package inherits that repository's
+# access permissions — which is what lets the release workflow keep pushing
+# without anyone granting it access by hand on the package page. It also gives
+# the package page its README and its "from this repository" link. Hardcoded
+# rather than passed in: the image is published from github.com, whatever
+# origin it happens to be built from.
 LABEL org.opencontainers.image.title="Couch Companion" \
       org.opencontainers.image.description="Apache CouchDB with the Couch Companion admin UI at /_utils/" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://github.com/HCL-TECH-SOFTWARE/couch-companion-ui" \
       org.opencontainers.image.base.name="docker.io/library/couchdb:latest"
 
 # share/www *is* Fauxton — and the bundled docs served at /_utils/docs/. Copying

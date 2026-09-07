@@ -30,11 +30,23 @@
 #                worst place to discover red, and this is the one command that
 #                mirrors CI, so no third copy of the step list exists.
 #   2. bump      npm version, which updates package.json AND package-lock.json.
-#   3. package   scripts/package.sh --fast --no-docker, AFTER the bump, so the
-#                tarball is named for the version being released. --fast because
-#                the gate above already ran everything it would repeat.
-#   4. push      the bump commit, carrying [skip ci] — see ci.yml.
-#   5. publish   the release, tagged from the bump commit, tarball attached.
+#   3. package   scripts/package.sh --fast, AFTER the bump, so the tarball and
+#                the image are both named for the version being released.
+#                --fast because the gate above already ran everything it would
+#                repeat. This builds the amd64 image AND verifies it by running
+#                it, which is the step that has to happen before anything is
+#                pushed anywhere.
+#   4. image     buildx rebuilds the SAME dist/ for amd64 and arm64 and pushes
+#                to GHCR — see CONTAINER IMAGE below for why it is a second
+#                build rather than a push of the one step 3 made.
+#   5. push      the bump commit, carrying [skip ci] — see ci.yml.
+#   6. publish   the release, tagged from the bump commit, tarball attached.
+#
+# Steps 1-3 publish nothing: they fail on this runner and leave the world
+# untouched. Of the three that do publish, the image goes first, because an
+# orphaned image tag is deleted from the package page in one click, whereas a
+# version bump pushed to main for a release that then died is a revert commit
+# and a version number nobody can ever use again.
 #
 # Publishing with GITHUB_TOKEN does NOT start another workflow run: GitHub
 # suppresses that deliberately, to stop workflows triggering each other in a
@@ -50,10 +62,56 @@
 #     can disagree. Give this job a PAT instead of GITHUB_TOKEN and validation
 #     starts running on both paths.
 #
+# CONTAINER IMAGE
+#
+# The image is `ghcr.io/hcl-tech-software/couch-companion`, built for
+# linux/amd64 and linux/arm64 — `couchdb:latest` publishes both, and half the
+# people who would run this are on a machine that is not x86.
+#
+# It is built TWICE, on purpose, and the two builds do different jobs:
+#
+#   scripts/package.sh   one architecture, native, loaded into the local image
+#                        store — because it then STARTS the thing and asks
+#                        /_utils/ what it serves. `COPY . share/www/` cannot
+#                        fail loudly; it will merge over a Fauxton that was
+#                        never removed, or land the bundle one directory too
+#                        deep, and both produce an image that boots, answers
+#                        /_up, and serves the wrong application. That check is
+#                        the whole reason package.sh has a Docker step, and it
+#                        cannot run against a foreign architecture.
+#   buildx               both architectures, straight to the registry — a
+#                        multi-platform build cannot be `--load`ed into the
+#                        local store, so there is no single image for the check
+#                        above to run against, and nothing to push afterwards.
+#
+# The second build is nearly free: the context is `dist/` and the Dockerfile is
+# two layers over `couchdb:latest`, so what it actually costs is pulling the
+# arm64 base. Paying that to keep a real "does this image work" gate is the
+# trade this makes.
+#
+# `:latest` moves only for a stable version. A prerelease pushes its own tag and
+# nothing else, so `docker pull couch-companion` never hands an operator an rc.
+#
+# WHAT GITHUB NEEDS FOR THE GHCR PUSH
+#
+#   - `packages: write` below. Declaring a `permissions:` block grants ONLY what
+#     it lists, so `contents: write` alone would 403 on the push.
+#   - Settings -> Actions -> General -> Workflow permissions set to read/write.
+#     That setting is the ceiling; the block above cannot exceed it.
+#   - Nothing else. No PAT, no secret: GITHUB_TOKEN authenticates to ghcr.io.
+#   - ONE manual step, once, after the first successful push: a package created
+#     by Actions is PRIVATE. github.com/orgs/HCL-TECH-SOFTWARE/packages ->
+#     couch-companion -> Package settings -> Change visibility -> Public. Until
+#     that is done every `docker pull` needs credentials.
+#   - docker/Dockerfile carries org.opencontainers.image.source, which is what
+#     links the package to this repository so it inherits the repository's
+#     permissions instead of needing them granted by hand.
+#
 # Guarded to github.com like pages.yml, but for a stronger reason: this one
-# WRITES — a commit to main and a public release. This GitHub Enterprise
-# instance is a temporary home with no `ubuntu-latest` runner, so the guard
-# stops a release being cut against the wrong origin the day a runner appears.
+# WRITES — a commit to main, a public release, and now a public image. This
+# GitHub Enterprise instance is a temporary home with no `ubuntu-latest` runner
+# and no GHCR, so the guard stops a release being cut against the wrong origin
+# the day a runner appears.
 
 name: Release
 
@@ -72,6 +130,9 @@ on:
 
 permissions:
   contents: write
+  # Lets GITHUB_TOKEN push to ghcr.io. Nothing else in this workflow uses it,
+  # and without it the docker login succeeds and the push 403s.
+  packages: write
 
 concurrency:
   group: release
@@ -117,11 +178,74 @@ jobs:
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           printf 'releasing %s\n' "$version"
 
+      - name: Work out the image name and tags
+        id: image
+        run: |
+          set -euo pipefail
+          # Lowercased, because a Docker repository name may not contain
+          # uppercase and this organisation is spelled HCL-TECH-SOFTWARE. Using
+          # ${{ github.repository_owner }} verbatim would fail the push with
+          # "invalid reference format", several minutes into the job.
+          owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          # `couch-companion`, not `couch-companion-ui`: the image is a whole
+          # CouchDB that happens to serve this UI, and it is the name
+          # scripts/package.sh defaults to and docs/install.md already documents.
+          name="ghcr.io/$owner/couch-companion"
+          version='${{ steps.bump.outputs.version }}'
+
+          # Multi-line output. The tag list is built here rather than inline in
+          # the build step because :latest is conditional, and an empty string
+          # left behind by a `&&/||` expression is not a tag anyone can push.
+          {
+            echo "name=$name"
+            echo 'tags<<TAGS'
+            echo "${name}:${version}"
+            case "$version" in
+              # A prerelease is exactly the version an operator must opt into by
+              # name, so it does not get to be what `docker pull` returns by
+              # default. package.sh still tags :latest locally; that tag simply
+              # never leaves the runner.
+              *-*) printf 'prerelease %s — :latest is not being moved\n' "$version" >&2 ;;
+              *) echo "${name}:latest" ;;
+            esac
+            echo TAGS
+          } >> "$GITHUB_OUTPUT"
+
       # After the bump: package.sh reads the version out of package.json, and
-      # the tarball is named for it. --no-docker keeps this to the artifact a
-      # GitHub release can carry; the image is still built by hand.
-      - name: Package the tarball
-        run: scripts/package.sh --fast --no-docker
+      # both artifacts are named for it. This is the step that builds the image
+      # for THIS runner's architecture and then runs it — see CONTAINER IMAGE
+      # above. Nothing is pushed here; package.sh never pushes.
+      - name: Package the tarball, build and verify the image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+        run: scripts/package.sh --fast
+
+      # Deliberately after package.sh, not before: setup-buildx-action makes a
+      # container-driver builder the default, and an image built by that driver
+      # does not land in the local image store — so package.sh's `docker run`
+      # verification would have nothing to start.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build for amd64 and arm64, and push to GHCR
+        uses: docker/build-push-action@v7
+        with:
+          # THE CONTEXT IS `dist`, NOT THE REPOSITORY ROOT. docker/Dockerfile
+          # explains this at length and package.sh repeats it: `COPY .` has to
+          # mean the built bundle. Point this at `.` and the whole checkout,
+          # source and node_modules, ends up inside share/www.
+          context: dist
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.bump.outputs.version }}
+          tags: ${{ steps.image.outputs.tags }}
+          push: true
 
       - name: Commit and push the bump
         run: |
@@ -148,3 +272,11 @@ jobs:
             --title '${{ steps.bump.outputs.tag }}' \
             --generate-notes \
             "release/couch-companion-ui-${{ steps.bump.outputs.version }}.tar.gz"
+
+      - name: Summary
+        run: |
+          {
+            printf '## %s\n\n' '${{ steps.bump.outputs.tag }}'
+            printf 'Image tags pushed:\n\n'
+            printf '%s\n' '${{ steps.image.outputs.tags }}' | sed 's/^/    docker pull /'
+          } >> "$GITHUB_STEP_SUMMARY"
