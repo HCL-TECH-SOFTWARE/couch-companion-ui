@@ -31,8 +31,8 @@
 #                  `release: published` trigger would never fire for it.
 #                  workflow_run is not suppressed that way. release.yml can no
 #                  longer push its version bump straight to protected main, so
-#                  this path deploys the latest published release tag instead of
-#                  assuming main already moved.
+#                  this path deploys the tarball attached to the latest
+#                  published release instead of assuming main already moved.
 #
 #   by hand        `release`. The UI, or `gh release create` under a personal
 #                  token, never runs release.yml at all, so workflow_run stays
@@ -67,40 +67,46 @@ jobs:
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
-      - name: Work out which release tag workflow_run should deploy
-        if: github.event_name == 'workflow_run'
-        id: workflow_run_ref
+      - name: Work out which release to deploy
+        if: github.event_name != 'workflow_dispatch'
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ref=$(gh release view --json tagName --jq .tagName)
-          [ -n "$ref" ] ||
+          case '${{ github.event_name }}' in
+            workflow_run) tag=$(gh release view --json tagName --jq .tagName) ;;
+            release) tag='${{ github.event.release.tag_name }}' ;;
+            *) echo "::error::Unexpected event ${{ github.event_name }}"; exit 1 ;;
+          esac
+          [ -n "$tag" ] ||
             { echo '::error::No published release was found to deploy'; exit 1; }
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
-        if: github.event_name == 'workflow_run'
-        with:
-          # workflow_run deploys the latest published release tag. The release
-          # workflow now records its version bump on main through a PR, so the
-          # tag — not main, and not `workflow_run.head_sha` — is the tree that
-          # was actually released.
-          ref: ${{ steps.workflow_run_ref.outputs.ref }}
-      - uses: actions/checkout@v7
-        if: github.event_name == 'release'
-        with:
-          # A hand-cut release already names the exact tag to deploy.
-          ref: ${{ github.event.release.tag_name }}
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Download and unpack the published release
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf dist /tmp/pages-release
+          mkdir -p dist /tmp/pages-release
+          gh release download '${{ steps.release.outputs.tag }}' \
+            --pattern 'couch-companion-ui-*.tar.gz' \
+            --dir /tmp/pages-release
+          tar xzf /tmp/pages-release/*.tar.gz -C dist
       - uses: actions/checkout@v7
         if: github.event_name == 'workflow_dispatch'
         with:
-          # A manual re-deploy is deliberately a re-deploy of trunk.
+          # A manual re-deploy is deliberately a rebuild of trunk.
           ref: main
       - uses: actions/setup-node@v7
+        if: github.event_name == 'workflow_dispatch'
         with:
           node-version: 24
-      - run: npm ci
-      - run: npx vite build
+      - if: github.event_name == 'workflow_dispatch'
+        run: npm ci
+      - if: github.event_name == 'workflow_dispatch'
+        run: npx vite build
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
