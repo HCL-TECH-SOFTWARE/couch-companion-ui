@@ -82,6 +82,10 @@ Two supported deployments, both from the same `dist/`:
 [docs/install.md](docs/install.md) has the actual steps for each case, the CouchDB config snippets,
 and the Fauxton rollback; `scripts/package.sh` builds the drop-in tarball.
 
+Once it is running, [docs/walkthrough/](docs/walkthrough/README.md) tours every screen — written
+for an administrator new to CouchDB, so it explains revisions, views, replication and the security
+model where each one first shows up.
+
 ## Development
 
 Open in the devcontainer (VS Code: "Reopen in Container"). It starts

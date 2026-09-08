@@ -27,6 +27,10 @@ browser talks to CouchDB's REST API directly, so "installing" means putting the 
 browser can fetch them and making sure that browser is allowed to call your CouchDB. Everything
 below is either a file copy or a one-time CouchDB config change.
 
+This page covers getting it installed. For what to do with it afterwards, the
+[capability walkthrough](walkthrough/README.md) tours every screen with screenshots and explains
+the CouchDB concepts behind them.
+
 Three ways to host it:
 
 - **Drop-in** — replace the contents of CouchDB's `share/www`. The UI is then served by CouchDB
