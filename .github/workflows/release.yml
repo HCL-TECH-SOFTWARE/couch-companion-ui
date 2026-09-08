@@ -39,14 +39,16 @@
 #   4. image     buildx rebuilds the SAME dist/ for amd64 and arm64 and pushes
 #                to GHCR — see CONTAINER IMAGE below for why it is a second
 #                build rather than a push of the one step 3 made.
-#   5. push      the bump commit, carrying [skip ci] — see ci.yml.
+#   5. record    commit the bump on a release branch and open a PR back to main.
+#                Repository rules now require PRs and verified commits on main,
+#                so the workflow records the version there the same way a person
+#                would: by proposing it for merge rather than pushing it.
 #   6. publish   the release, tagged from the bump commit, tarball attached.
 #
 # Steps 1-3 publish nothing: they fail on this runner and leave the world
 # untouched. Of the three that do publish, the image goes first, because an
 # orphaned image tag is deleted from the package page in one click, whereas a
-# version bump pushed to main for a release that then died is a revert commit
-# and a version number nobody can ever use again.
+# stray release PR or release page is cheap to close and rerun.
 #
 # Publishing with GITHUB_TOKEN does NOT start another workflow run: GitHub
 # suppresses that deliberately, to stop workflows triggering each other in a
@@ -54,8 +56,9 @@
 #
 #   - pages.yml hangs off `workflow_run` on THIS workflow, not off the release
 #     event, because workflow_run is not suppressed the way repository events
-#     are. That is also what makes the ordering real: Pages deploys after the
-#     bump commit is on main, so the published site carries the new version.
+#     are. It deploys the latest published release tag after this job succeeds,
+#     because the version bump now reaches main through the PR this workflow
+#     opens rather than a direct push to the protected branch.
 #   - validate-release.yml will NOT run for releases this workflow creates. That
 #     is not a gap: the tag is derived from package.json here, so the two agree
 #     by construction. Validation exists for the hand-cut release, where they
@@ -108,7 +111,7 @@
 #     permissions instead of needing them granted by hand.
 #
 # Guarded to github.com like pages.yml, but for a stronger reason: this one
-# WRITES — a commit to main, a public release, and now a public image. This
+# WRITES — a release branch and PR, a public release, and now a public image. This
 # GitHub Enterprise instance is a temporary home with no `ubuntu-latest` runner
 # and no GHCR, so the guard stops a release being cut against the wrong origin
 # the day a runner appears.
@@ -133,6 +136,7 @@ permissions:
   # Lets GITHUB_TOKEN push to ghcr.io. Nothing else in this workflow uses it,
   # and without it the docker login succeeds and the push 403s.
   packages: write
+  pull-requests: write
 
 concurrency:
   group: release
@@ -247,17 +251,31 @@ jobs:
           tags: ${{ steps.image.outputs.tags }}
           push: true
 
-      - name: Commit and push the bump
+      - name: Commit the bump, push a release branch, and open a PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add package.json package-lock.json
-          # [skip ci] belongs in the message even though a GITHUB_TOKEN push
-          # cannot start a workflow anyway: it is what keeps this safe if the
-          # token is ever swapped for a PAT, and ci.yml reads it too.
-          git commit -m "chore(release): ${{ steps.bump.outputs.version }} [skip ci]"
-          git push origin main
+          git commit -m "chore(release): ${{ steps.bump.outputs.version }}"
+
+          branch='release/${{ steps.bump.outputs.tag }}'
+          git switch -c "$branch"
+          git push --force-with-lease origin "HEAD:$branch"
+
+          pr_url=$(gh pr list --base main --head "$branch" --json url --jq '.[0].url')
+          [ "$pr_url" = 'null' ] && pr_url=''
+          if [ -z "$pr_url" ]; then
+            pr_url=$(gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(release): ${{ steps.bump.outputs.version }}" \
+              --body "Release ${{ steps.bump.outputs.tag }} was cut successfully. This PR records the matching package.json and package-lock.json version bump on main so future releases start from the released version.")
+          fi
+          echo "url=$pr_url" >> "$GITHUB_OUTPUT"
 
       - name: Publish the release
         env:
@@ -277,6 +295,7 @@ jobs:
         run: |
           {
             printf '## %s\n\n' '${{ steps.bump.outputs.tag }}'
+            printf 'Release PR: %s\n\n' '${{ steps.pr.outputs.url }}'
             printf 'Image tags pushed:\n\n'
             printf '%s\n' '${{ steps.image.outputs.tags }}' | sed 's/^/    docker pull /'
           } >> "$GITHUB_STEP_SUMMARY"

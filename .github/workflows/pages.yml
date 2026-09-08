@@ -29,10 +29,10 @@
 #                  GITHUB_TOKEN, and GitHub deliberately does not start workflow
 #                  runs from the repository events such a token raises — a
 #                  `release: published` trigger would never fire for it.
-#                  workflow_run is not suppressed that way, and it is also what
-#                  orders the two: this cannot start until release.yml has
-#                  finished pushing the version bump, so the deployed site
-#                  carries the version that was just released.
+#                  workflow_run is not suppressed that way. release.yml can no
+#                  longer push its version bump straight to protected main, so
+#                  this path deploys the latest published release tag instead of
+#                  assuming main already moved.
 #
 #   by hand        `release`. The UI, or `gh release create` under a personal
 #                  token, never runs release.yml at all, so workflow_run stays
@@ -67,17 +67,38 @@ jobs:
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
+      - name: Work out which tree to deploy
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case '${{ github.event_name }}' in
+            workflow_run)
+              ref=$(gh release view --json tagName --jq .tagName)
+              [ -n "$ref" ] ||
+                { echo '::error::No published release was found to deploy'; exit 1; }
+              ;;
+            release)
+              ref='${{ github.event.release.tag_name }}'
+              ;;
+            *)
+              ref='main'
+              ;;
+          esac
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           # Which tree counts as "what was released" depends on the trigger:
-          #   workflow_run  main, where release.yml just pushed the bump — and
-          #                 NOT `workflow_run.head_sha`, which is the commit
-          #                 release.yml STARTED from, one before the version it
-          #                 released.
+          #   workflow_run  the latest published release tag. The release
+          #                 workflow now records its version bump on main through
+          #                 a PR, so the tag — not main, and not
+          #                 `workflow_run.head_sha` — is the tree that was
+          #                 actually released.
           #   release       the tag itself. It is precisely what was released,
           #                 and main may already have moved past it.
           #   dispatch      main, this being a deliberate re-deploy of trunk.
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
+          ref: ${{ steps.ref.outputs.ref }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
