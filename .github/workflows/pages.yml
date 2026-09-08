@@ -67,38 +67,35 @@ jobs:
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
-      - name: Work out which tree to deploy
-        id: ref
+      - name: Work out which release tag workflow_run should deploy
+        if: github.event_name == 'workflow_run'
+        id: workflow_run_ref
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          case '${{ github.event_name }}' in
-            workflow_run)
-              ref=$(gh release view --json tagName --jq .tagName)
-              [ -n "$ref" ] ||
-                { echo '::error::No published release was found to deploy'; exit 1; }
-              ;;
-            release)
-              ref='${{ github.event.release.tag_name }}'
-              ;;
-            *)
-              ref='main'
-              ;;
-          esac
+          ref=$(gh release view --json tagName --jq .tagName)
+          [ -n "$ref" ] ||
+            { echo '::error::No published release was found to deploy'; exit 1; }
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
+        if: github.event_name == 'workflow_run'
         with:
-          # Which tree counts as "what was released" depends on the trigger:
-          #   workflow_run  the latest published release tag. The release
-          #                 workflow now records its version bump on main through
-          #                 a PR, so the tag — not main, and not
-          #                 `workflow_run.head_sha` — is the tree that was
-          #                 actually released.
-          #   release       the tag itself. It is precisely what was released,
-          #                 and main may already have moved past it.
-          #   dispatch      main, this being a deliberate re-deploy of trunk.
-          ref: ${{ steps.ref.outputs.ref }}
+          # workflow_run deploys the latest published release tag. The release
+          # workflow now records its version bump on main through a PR, so the
+          # tag — not main, and not `workflow_run.head_sha` — is the tree that
+          # was actually released.
+          ref: ${{ steps.workflow_run_ref.outputs.ref }}
+      - uses: actions/checkout@v7
+        if: github.event_name == 'release'
+        with:
+          # A hand-cut release already names the exact tag to deploy.
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/checkout@v7
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          # A manual re-deploy is deliberately a re-deploy of trunk.
+          ref: main
       - uses: actions/setup-node@v7
         with:
           node-version: 24
