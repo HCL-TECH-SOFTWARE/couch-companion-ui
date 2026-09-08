@@ -115,8 +115,8 @@ jobs:
             | unique_by(.id)
           ' versions.json > keep.json
 
-          # GHCR takes the GITHUB_TOKEN base64-encoded as a registry bearer.
-          reg_token=$(printf '%s' "$GH_TOKEN" | base64 | tr -d '\n')
+          # GHCR accepts the raw GITHUB_TOKEN as a registry bearer token (no base64 encoding).
+          reg_token=$GH_TOKEN
 
           # Protected = every kept manifest list, AND every child manifest it
           # references. `curl -f` plus pipefail on purpose: if the registry
