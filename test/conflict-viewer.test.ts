@@ -446,7 +446,7 @@ describe('CcaConflictViewer', () => {
 
     // Two guards used to live here, one asserting that every --wa- token this component names is
     // declared by the theme, one asserting it names no --cca- property. Both are now lint rules —
-    // cca/no-undefined-wa-token and cca/no-cca-custom-property, in frontend/eslint-rules/ — which
+    // cca/no-undefined-wa-token and cca/no-cca-custom-property, in frontend/lint-rules/ — which
     // check all of src/ rather than one component, and need no token-count pin to stay
     // non-vacuous. See #718 and #729.
   });

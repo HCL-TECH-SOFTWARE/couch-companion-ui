@@ -40,7 +40,7 @@ Rough edges to know about before you judge the repo:
   such endpoint simply do not get the option. No ID token is retained to power it, so some
   providers will ask you to confirm the sign-out; that is the trade for not keeping a credential
   around for one optional parameter. `post_logout_redirect_uri` must be registered with your IdP —
-  see [install.md](install.md#register-two-uris-not-one-sign-in-and-sign-out).
+  see [docs/install.md](docs/install.md#register-two-uris-not-one-sign-in-and-sign-out).
 - **IdP admin without a backend**: OIDC discovery and JWKS fetch, JWK→SPKI PEM conversion in the
   browser via WebCrypto, written to CouchDB's own `_node/_local/_config` — `[jwt_keys]` for the
   signing key, `[oidc]` for the provider's metadata, both under the same `rsa:<kid>` key so an
@@ -81,6 +81,10 @@ Two supported deployments, both from the same `dist/`:
 
 [docs/install.md](docs/install.md) has the actual steps for each case, the CouchDB config snippets,
 and the Fauxton rollback; `scripts/package.sh` builds the drop-in tarball.
+
+Once it is running, [docs/walkthrough/](docs/walkthrough/README.md) tours every screen — written
+for an administrator new to CouchDB, so it explains revisions, views, replication and the security
+model where each one first shows up.
 
 ## Development
 

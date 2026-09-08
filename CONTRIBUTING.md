@@ -141,7 +141,7 @@ needs; JWT sign-in against the cluster is not set up.
 One command decides whether a patch is mergeable:
 
 ```
-npm run check      # eslint + vitest + tsc --noEmit
+npm run check      # oxlint + vitest + tsc --noEmit
 ```
 
 `.github/workflows/ci.yml` runs exactly that, plus `npx vite build` and
@@ -194,9 +194,14 @@ passes after.
 
 ## Code conventions
 
-Most of these are enforced by ESLint, including four rules custom to this repo
-in `eslint-rules/`. The rule exists in each case because the mistake it catches
-is invisible in review and loud in production.
+Most of these are enforced by [oxlint](https://oxc.rs/docs/guide/usage/linter),
+including seven rules custom to this repo in `lint-rules/`, loaded as a plugin via
+`jsPlugins` in `.oxlintrc.json`. The rule exists in each case because the mistake it
+catches is invisible in review and loud in production.
+
+The config is deliberately minimal: every oxlint category is switched off, so the only
+rules that run are the ones listed there. Adopting a preset is #703 — it would surface a
+large pre-existing backlog and bury these guardrails.
 
 | Rule | What it enforces |
 | --- | --- |
@@ -204,6 +209,14 @@ is invisible in review and loud in production.
 | `cca/no-hardcoded-typography` | No literal `font-family`, `font-size`, or `line-height` values — use the tokens. (`letter-spacing` is exempt; Web Awesome ships no token for it.) |
 | `cca/no-cca-custom-property` | The retired `--cca-*` namespace stays retired. |
 | `cca/max-ternary-lines` | Warns past ten lines of ternary; extract instead. |
+| `cca/no-session-key-literals` | The `cca_token` / `cca_user` storage keys may only be named in `auth-service.ts`. |
+| `cca/service-layer-only` | Only services may call `ApiClient.request()`; components go through a service. |
+| `cca/no-bracket-request-access` | No `api['request']` bracket access — it was a workaround for `private`. |
+
+The last three encode the layering **component -> service -> ApiClient -> network**, where
+nothing may skip a layer. Their exemptions — the three sanctioned HTTP boundaries, the logging
+facade, and `auth-service.ts` — are declared in `overrides` in `.oxlintrc.json`, each with a
+comment saying why that file is allowed what it is allowed.
 
 Beyond the linter:
 
@@ -239,17 +252,21 @@ Mango editor`), a blank line, then the reasoning. Reference the issue.
 
 This project keeps its reasoning in the tree rather than in a wiki:
 
-- [docs/derivate-creation.md](docs/derivate-creation.md) — the design and
-  decision log, D1–D19, with the per-phase decisions that corrected it where
-  implementation disagreed with the plan.
-- [docs/plans/](docs/plans/) — each phase's plan and its record of what was
-  verified against live servers.
-- [docs/install.md](docs/install.md) — deployment, both modes.
+- [docs/install.md](docs/install.md) — deployment: the drop-in, the container
+  image and the SPA mode, with the CouchDB configuration each one needs.
+- The source itself. A decision that is not obvious from the code is recorded
+  next to the code it constrains, in a comment that says *why* rather than
+  restating *what*: `scripts/package.sh` on the archive layout,
+  `docker/Dockerfile` on the build context, `src/services/csp-policy.ts` on the
+  header it writes.
+
+Some of those comments cite a decision by identifier — `D13`, `spec §5`. Those
+name constraints from the design log kept with the upstream project, which this
+repository does not carry. Read them as the name of a constraint, not as a link.
 
 A change that contradicts a recorded decision should say so and update the
-record. That log is the reason a reviewer can tell an intentional constraint
-from an accident, and it is a large part of what makes this codebase
-transferable.
+record in the same commit. Being able to tell an intentional constraint from an
+accident is a large part of what makes this codebase transferable.
 
 ## Code of conduct
 

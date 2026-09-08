@@ -104,7 +104,7 @@ if [ "$FAST" = 0 ]; then
   # `npm ci` and not `npm install`: CI installs from the lockfile alone, and a
   # local `npm install` can silently resolve something the lockfile does not
   # pin. A worktree with no node_modules of its own also breaks the custom
-  # eslint rules, which read WA's CSS by a worktree-relative path.
+  # lint rules, which read WA's CSS by a worktree-relative path.
   say "npm ci"
   npm ci || fail "npm ci"
 fi

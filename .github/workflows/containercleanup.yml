@@ -1,0 +1,179 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Prunes old versions of the `couch-companion` container package, keeping the
+# ten most recent releases. Sunday 01:00 UTC, or on demand.
+#
+# WHY THIS IS NOT `min-versions-to-keep: 10`
+#
+# release.yml pushes a MULTI-ARCH image. One `docker push` of it does not create
+# one package version in GHCR, it creates several:
+#
+#   sha256:aaa   the manifest LIST — this is the one tagged `0.4.0` / `latest`
+#   sha256:bbb     the linux/amd64 image it points at   — UNTAGGED
+#   sha256:ccc     the linux/arm64 image it points at   — UNTAGGED
+#   sha256:ddd     provenance attestations, one per platform — UNTAGGED
+#
+# Two things follow, and both of them bite:
+#
+#   - Counting versions is not counting releases. `min-versions-to-keep: 10`
+#     keeps ten VERSIONS, which is about two releases, not ten.
+#   - Those untagged rows are not garbage. They are the actual images. Delete
+#     one that a surviving manifest list still references and the tag stays
+#     right there in the UI, looking healthy, while `docker pull` fails on a
+#     manifest that is no longer in the registry. `delete-only-untagged-
+#     versions: true` does exactly this, to every release at once.
+#
+# So the retention set is worked out here instead: take the newest ten TAGGED
+# versions, ask the registry which child manifests each one references, and
+# protect all of it. Whatever is left over is genuinely unreferenced and safe to
+# delete — orphans from releases that have already aged out. The list of ids
+# then goes to actions/delete-package-versions, which is happy to be told
+# exactly what to remove rather than working it out from a count.
+#
+# WHAT GITHUB NEEDS
+#
+#   - `packages: write` below, which covers both reading the version list and
+#     deleting. No PAT: the package is linked to this repository by the
+#     org.opencontainers.image.source label in docker/Dockerfile, so GITHUB_TOKEN
+#     inherits the repository's permission on it. If that label is ever dropped
+#     the link goes with it and this job starts 403ing on the delete.
+#   - Nothing else. The schedule needs no enabling, though GitHub disables cron
+#     on repositories with no activity for 60 days.
+
+name: Container cleanup
+
+on:
+  schedule:
+    - cron: '0 1 * * 0'
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+concurrency:
+  group: container-cleanup
+  cancel-in-progress: false
+
+jobs:
+  house-keeping:
+    # Same guard as release.yml and pages.yml: this GitHub Enterprise instance
+    # has no GHCR, so there is no package here to prune.
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE: couch-companion
+      KEEP: 10
+    steps:
+      - name: Work out which versions are unreferenced
+        id: prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          owner='${{ github.repository_owner }}'
+          # The registry path is lowercase even though the org is not — same
+          # reason release.yml lowercases it before tagging.
+          owner_lc=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+
+          # Before the first release there is no package at all. That is a
+          # normal state for this job to run in, not a failure.
+          if ! gh api "/orgs/$owner/packages/container/$PACKAGE" >/dev/null 2>&1; then
+            echo "no $PACKAGE package published yet — nothing to prune"
+            echo 'ids=' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Every version, newest first. For a container package `name` is the
+          # digest; the tags are under metadata.container.tags.
+          gh api --paginate "/orgs/$owner/packages/container/$PACKAGE/versions" \
+            | jq -s 'add | sort_by(.created_at) | reverse' > versions.json
+
+          # The releases are the tagged versions. Keep the newest $KEEP — plus
+          # whatever carries `latest`, which a run of prereleases could
+          # otherwise push out of that window while it is still the tag every
+          # `docker pull` with no version resolves to.
+          jq --argjson keep "$KEEP" '
+            [ .[] | select((.metadata.container.tags | length) > 0) ] as $tagged
+            | $tagged[:$keep]
+              + [ $tagged[] | select(.metadata.container.tags | index("latest")) ]
+            | unique_by(.id)
+          ' versions.json > keep.json
+
+          # GHCR takes the GITHUB_TOKEN base64-encoded as a registry bearer.
+          reg_token=$(printf '%s' "$GH_TOKEN" | base64 | tr -d '\n')
+
+          # Protected = every kept manifest list, AND every child manifest it
+          # references. `curl -f` plus pipefail on purpose: if the registry
+          # cannot be asked what a manifest contains, this job must stop rather
+          # than carry on with a short protection list and delete live images.
+          : > protected.txt
+          while IFS= read -r digest; do
+            printf '%s\n' "$digest" >> protected.txt
+            curl -fsSL \
+              -H "Authorization: Bearer $reg_token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json' \
+              -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+              -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+              -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/$owner_lc/$PACKAGE/manifests/$digest" \
+              | jq -r '.manifests // [] | .[].digest' >> protected.txt
+          done < <(jq -r '.[].name' keep.json)
+
+          sort -u protected.txt | jq -R . | jq -s . > protected.json
+
+          ids=$(jq -r --slurpfile prot protected.json '
+            [ .[]
+              | . as $v
+              | select(($prot[0] | index($v.name)) == null)
+              | $v.id
+            ] | join(",")
+          ' versions.json)
+
+          total=$(jq length versions.json)
+          kept=$(jq length keep.json)
+          prot=$(jq length protected.json)
+          doomed=$(jq -r --slurpfile prot protected.json '
+            [ .[] | . as $v | select(($prot[0] | index($v.name)) == null) ] | length
+          ' versions.json)
+
+          printf '%s versions total, %s tagged releases kept, %s protected, %s to delete\n' \
+            "$total" "$kept" "$prot" "$doomed"
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+
+          {
+            printf '## Container cleanup\n\n'
+            printf '| | count |\n|---|---|\n'
+            printf '| versions in the package | %s |\n' "$total"
+            printf '| tagged releases kept | %s |\n' "$kept"
+            printf '| manifests protected | %s |\n' "$prot"
+            printf '| unreferenced, deleted | %s |\n\n' "$doomed"
+            printf 'Kept:\n\n'
+            jq -r '.[] | "- `" + (.metadata.container.tags | join("`, `")) + "`"' keep.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Limit to last 10 containers
+        if: steps.prune.outputs.ids != ''
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ env.PACKAGE }}
+          package-type: container
+          # Explicit ids, not a count. The step above is what decides; this step
+          # only carries out the deletion.
+          package-version-ids: ${{ steps.prune.outputs.ids }}

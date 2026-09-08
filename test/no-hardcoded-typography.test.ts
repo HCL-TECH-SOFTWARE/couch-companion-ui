@@ -17,37 +17,19 @@
  * under the License.
  */
 
-import { Linter, RuleTester } from 'eslint';
-import { describe, expect, it } from 'vitest';
+import { RuleTester } from 'oxlint/plugins-dev';
+import { describe, it } from 'vitest';
 
-import rule from '../eslint-rules/no-hardcoded-typography.js';
+import rule from '../lint-rules/no-hardcoded-typography.js';
 
 // vitest runs with `globals: false` (vitest.config.ts), so RuleTester cannot find describe/it.
 RuleTester.describe = describe;
 RuleTester.it = it;
 RuleTester.itOnly = it.only;
 
-describe('report location', () => {
-  // A `static styles = css`...`` block is one template literal spanning hundreds of lines.
-  // Reporting the node would point every violation at line 1.
-  it('points at the declaration, not at the top of the template literal', () => {
-    const code = ['const s = css`', '  div {', '    font-size: 0.875rem;', '  }', '`;'].join('\n');
-
-    const messages = new Linter().verify(code, {
-      plugins: { cca: { rules: { 'no-hardcoded-typography': rule } } },
-      rules: { 'cca/no-hardcoded-typography': 'error' },
-      languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
-    });
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].line).toBe(3);
-    expect(code.split('\n')[2].slice(messages[0].column - 1)).toMatch(/^font-size/);
-    expect(messages[0].message).toContain("'font-size: 0.875rem'");
-  });
-});
-
 const ruleTester = new RuleTester({
-  languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
+  eslintCompat: true,
+  languageOptions: { sourceType: 'module' },
 });
 
 // The rule must be observed to REPORT, not merely to pass. A rule whose matcher silently finds
@@ -79,6 +61,19 @@ ruleTester.run('no-hardcoded-typography', rule, {
     { code: "const monacoOption = 'fontFamily';" },
   ],
   invalid: [
+    // A `static styles = css`...`` block is one template literal spanning hundreds of lines.
+    // Reporting the node would point every violation at line 1, so the rule reports the offset of
+    // the declaration itself. Line and column are the whole point of this case.
+    {
+      code: ['const s = css`', '  div {', '    font-size: 0.875rem;', '  }', '`;'].join('\n'),
+      errors: [
+        {
+          message: /'font-size: 0\.875rem'/,
+          line: 3,
+          column: 5, // where `font-size` starts on that line, not the template's line 1
+        },
+      ],
+    },
     {
       code: 'const s = css`div { font-size: 0.875rem; }`;',
       errors: [{ messageId: 'hardcodedTypography', data: { property: 'font-size', value: '0.875rem', hint: '--wa-font-size-{3xs…5xl}, or --wa-font-size-smaller/-larger to size relative to the parent' } }],

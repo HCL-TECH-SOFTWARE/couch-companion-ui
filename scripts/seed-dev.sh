@@ -35,6 +35,18 @@ wait_for() {
   done
   say "ERROR: $name never came up ($url)"; exit 1
 }
+# /_restart answers before chttpd drops its listener, so an immediate /_up is
+# still served by the process that is about to die. Watch for the socket to go
+# away before waiting for it to come back; not seeing it go is odd but not
+# fatal, so warn and carry on rather than break container start.
+wait_down() {
+  local url=$1 i
+  for i in $(seq 1 50); do
+    curl -sf "$url" >/dev/null || return 0
+    sleep 0.2
+  done
+  say "WARN: couchdb never went down after /_restart; continuing"
+}
 
 wait_for "$COUCH/_up" couchdb
 wait_for "$KC/realms/couch/.well-known/openid-configuration" keycloak
@@ -80,6 +92,7 @@ cfg "chttpd/authentication_handlers" \
 # the application in place — no container restart needed. It is documented
 # as an integration-testing facility, which is exactly this use case.
 curl -sf -u "$ADMIN" -X POST "$COUCH/_node/_local/_restart" >/dev/null
+wait_down "$COUCH/_up"
 wait_for "$COUCH/_up" couchdb
 
 cfg "jwt_auth/required_claims" '"exp"'

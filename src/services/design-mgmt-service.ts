@@ -1304,7 +1304,7 @@ export class DesignMgmtService {
     try {
       for (const p of toApply) {
         // Destructured only to drop CouchDB metadata a hand-edited repo file might carry — this
-        // project's ESLint config has no unused-vars rule to satisfy, so no suppression is needed.
+        // project's lint config has no unused-vars rule to satisfy, so no suppression is needed.
         const { _id, _rev, _revisions, ...rest } = p.body as Record<string, unknown> & {
           _id?: unknown;
           _rev?: unknown;

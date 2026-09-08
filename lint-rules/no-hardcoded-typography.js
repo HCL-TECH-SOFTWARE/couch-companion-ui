@@ -66,7 +66,6 @@ const HINTS = {
   font: "'font: inherit', or the longhand properties each set from their token",
 };
 
-/** @type {import('eslint').Rule.RuleModule} */
 const rule = {
   meta: {
     type: 'problem',

@@ -27,19 +27,27 @@ browser talks to CouchDB's REST API directly, so "installing" means putting the 
 browser can fetch them and making sure that browser is allowed to call your CouchDB. Everything
 below is either a file copy or a one-time CouchDB config change.
 
+This page covers getting it installed. For what to do with it afterwards, the
+[capability walkthrough](walkthrough/README.md) tours every screen with screenshots and explains
+the CouchDB concepts behind them.
+
 Three ways to host it:
 
 - **Drop-in** — replace the contents of CouchDB's `share/www`. The UI is then served by CouchDB
   itself at `/_utils/`, same-origin, with **zero configuration**. This is the primary path.
-- **Container image** — `couch-companion`, the official `couchdb` image with that same drop-in
-  already applied. Nothing to install into and nothing to destroy: `docker run` it and `/_utils/`
-  is this app. Best when you are standing up a *new* CouchDB rather than changing one you already
-  run. See [Container image](#container-image).
+- **Container image** — `ghcr.io/hcl-tech-software/couch-companion`, the official `couchdb`
+  image with that same drop-in already applied. Nothing to build, nothing to install into and
+  nothing to destroy: `docker run` it and `/_utils/` is this app. Best when you are standing up a
+  *new* CouchDB rather than changing one you already run. See
+  [Container image](#container-image).
 - **SPA** — host the same files anywhere static (GitHub Pages, Cloudflare Pages, nginx, another
   port on the same host) and point them at a CouchDB. This one needs CORS, and — depending on
   where you host it — needs HTTPS. See [SPA install](#spa-install).
 
 ## Getting the bundle
+
+Only for the drop-in and SPA installs. The container image is published to GHCR and needs nothing
+from this section — see [Container image](#container-image).
 
 Run the packaging script:
 
@@ -50,8 +58,9 @@ It produces two things from one build:
 - `release/couch-companion-ui-<version>.tar.gz`. The tarball's members unpack **directly into
   `share/www`** — there is no wrapper directory to strip, so `tar -xzf … -C <share/www>` puts
   every file exactly where CouchDB looks for it.
-- The `couch-companion` container image, tagged `<version>` and `latest`. Add `--no-docker` to
-  skip it (the script otherwise requires a working Docker and fails without one).
+- A local `couch-companion` container image, tagged `<version>` and `latest`, for this machine's
+  architecture only. Add `--no-docker` to skip it (the script otherwise requires a working Docker
+  and fails without one). You do not need this to *run* the image — the published one is above.
 
 Run it **on the host**, not from this repository's devcontainer: that container has no Docker
 socket, so the image half cannot work there and the script stops at its first step rather than
@@ -64,14 +73,29 @@ unpack the tarball.
 
 ## Container image
 
-The shortest path to a running instance, and the only one on this page that does not modify
-something you already have:
+The shortest path to a running instance. It is the only one on this page that modifies nothing
+you already have — and the only one that needs no checkout of this repository:
 
     docker run -d --name couch-companion -p 5984:5984 \
       -e COUCHDB_USER=admin -e COUCHDB_PASSWORD=<choose one> \
-      -v couchdb_data:/opt/couchdb/data couch-companion:<version>
+      -v couchdb_data:/opt/couchdb/data \
+      ghcr.io/hcl-tech-software/couch-companion:latest
 
 Open `http://127.0.0.1:5984/_utils/`. That is the whole install.
+
+Published for `linux/amd64` and `linux/arm64` from one manifest, so that single tag is also the
+right image on an ARM server or an Apple Silicon laptop — Docker picks the architecture for you.
+
+Which tag to use:
+
+- `latest` — the newest **stable** release. A prerelease never moves it, so this tag cannot hand
+  you a release candidate by surprise.
+- `<version>` — one exact release, e.g. `ghcr.io/hcl-tech-software/couch-companion:0.3.0`. Pin
+  this anywhere it matters. Prereleases are published under their own version (`1.0.0-rc.1`) and
+  are reachable *only* by name, which is the point of them.
+
+If you built the image yourself with `scripts/package.sh` instead, it is tagged
+`couch-companion:<version>` locally — use that name in the command above.
 
 The image is `FROM couchdb:latest` with `share/www` replaced (see `docker/Dockerfile`), so it is
 the official CouchDB in every other respect — same entrypoint, same `5984`, same
@@ -87,7 +111,14 @@ Two things carry over from the drop-in, because the image *is* a drop-in:
   [the drop-in's CSP section](#git-sync-needs-one-more-change-couchdbs-content-security-policy).
   The image ships CouchDB's default policy untouched.
 
-The packaging script does not push anywhere. To put the image in a registry:
+### Publishing
+
+Releases publish the image themselves. `.github/workflows/release.yml` builds it for both
+architectures and pushes it to GHCR as part of cutting a release, so the tags above appear
+without anyone running a `docker push`.
+
+`scripts/package.sh` still pushes nowhere — it builds and verifies locally, and that is all. To
+put a locally built image in a registry by hand:
 
     docker tag couch-companion:<version> <registry>/couch-companion:<version>
     docker push <registry>/couch-companion:<version>

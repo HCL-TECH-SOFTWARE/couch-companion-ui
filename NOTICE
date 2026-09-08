@@ -46,7 +46,7 @@ THIRD-PARTY COMPONENTS
 ==============================================================================
 
 The source tree contains no third-party code. Everything under src/, test/,
-scripts/, eslint-rules/, and docs/ is original work licensed under the Apache
+scripts/, lint-rules/, and docs/ is original work licensed under the Apache
 License 2.0; third-party packages are resolved from npm at build time and
 node_modules/ is not tracked in git.
 

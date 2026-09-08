@@ -17,37 +17,19 @@
  * under the License.
  */
 
-import { Linter, RuleTester } from 'eslint';
-import { describe, expect, it } from 'vitest';
+import { RuleTester } from 'oxlint/plugins-dev';
+import { describe, it } from 'vitest';
 
-import rule from '../eslint-rules/no-cca-custom-property.js';
+import rule from '../lint-rules/no-cca-custom-property.js';
 
 // vitest runs with `globals: false` (vitest.config.ts), so RuleTester cannot find describe/it.
 RuleTester.describe = describe;
 RuleTester.it = it;
 RuleTester.itOnly = it.only;
 
-describe('report location', () => {
-  // A `static styles = css`...`` block is one template literal spanning hundreds of lines.
-  // Reporting the node would point every violation at line 1.
-  it('points at the property, not at the top of the template literal', () => {
-    const code = ['const s = css`', '  div {', '    color: var(--cca-text-muted);', '  }', '`;'].join('\n');
-
-    const messages = new Linter().verify(code, {
-      plugins: { cca: { rules: { 'no-cca-custom-property': rule } } },
-      rules: { 'cca/no-cca-custom-property': 'error' },
-      languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
-    });
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].line).toBe(3);
-    expect(code.split('\n')[2].slice(messages[0].column - 1)).toMatch(/^--cca-text-muted/);
-    expect(messages[0].message).toContain("'--cca-text-muted'");
-  });
-});
-
 const ruleTester = new RuleTester({
-  languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
+  eslintCompat: true,
+  languageOptions: { sourceType: 'module' },
 });
 
 // The rule must be observed to REPORT, not merely to pass. A rule whose matcher silently finds
@@ -64,6 +46,20 @@ ruleTester.run('no-cca-custom-property', rule, {
     { code: 'const key = "ccaTheme";' },
   ],
   invalid: [
+    // A `static styles = css`...`` block is one template literal spanning hundreds of lines.
+    // Reporting the node would point every violation at line 1, so the rule reports the offset of
+    // the property itself. Line and column are the whole point of this case.
+    {
+      code: ['const s = css`', '  div {', '    color: var(--cca-text-muted);', '  }', '`;'].join('\n'),
+      errors: [
+        {
+          messageId: 'ccaProperty',
+          data: { property: '--cca-text-muted' },
+          line: 3,
+          column: 16, // where `--cca-text-muted` starts on that line, not the template's line 1
+        },
+      ],
+    },
     // A reference.
     {
       code: 'const s = css`div { color: var(--cca-text-muted); }`;',

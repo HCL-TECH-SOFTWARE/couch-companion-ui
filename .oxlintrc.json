@@ -1,0 +1,129 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+
+  // Deliberately minimal, and deliberately NOT oxlint's defaults. Every category is switched off
+  // explicitly below, leaving only the rules listed here. An empty `categories: {}` is NOT enough
+  // — that is the default, and the default enables `correctness`, which on this codebase reports
+  // 5 errors and 38 warnings of pre-existing backlog that would bury the guardrails and break CI
+  // on day one. That is the same reason the ESLint config this replaces carried no preset either.
+  // Preset adoption is #703; linting test/ is #704.
+  //
+  // The rules encode one architectural rule: component -> service -> ApiClient -> network.
+  // Nothing may skip a layer. `no-restricted-globals` stops a component reaching the network;
+  // `cca/service-layer-only` stops it reaching ApiClient; `cca/no-session-key-literals` stops it
+  // reaching the session token.
+  //
+  // Exemptions live in `overrides` at the bottom. They are intentional, not debt — each one is a
+  // sanctioned boundary, and the comment on it says why it is the only file allowed to do that.
+  //
+  // A temporary exemption is instead an `oxlint-disable` comment in the offending file, tagged
+  // with the issue that will remove it. `reportUnusedDisableDirectives` means that once the last
+  // violation in a file is migrated, the now-pointless directive itself fails the lint. The
+  // ratchet cleans up after itself. There are currently none in src/ — #678 is fully paid down.
+
+  "plugins": [],
+  "categories": {
+    "correctness": "off",
+    "nursery": "off",
+    "pedantic": "off",
+    "perf": "off",
+    "restriction": "off",
+    "style": "off",
+    "suspicious": "off"
+  },
+
+  "jsPlugins": ["./lint-rules/index.js"],
+
+  "options": {
+    "reportUnusedDisableDirectives": "error"
+  },
+
+  "rules": {
+    // A --wa- token the theme never declares renders as the guaranteed-invalid value: the
+    // declaration is dropped, or a colour silently becomes currentcolor. See #718, and #580
+    // for what it looks like in production.
+    "cca/no-undefined-wa-token": "error",
+
+    // The sibling rule. Web Awesome's tokens are the only palette: the retired --cca- ones
+    // were light-mode literals that ignored wa-dark. See #729.
+    "cca/no-cca-custom-property": "error",
+
+    // Typography literals sever the only path a theme switch has into a shadow root; text
+    // must derive from the --wa- font tokens. See #774.
+    "cca/no-hardcoded-typography": "error",
+
+    // A smell, not a defect, so it warns rather than fails the build — and there is a
+    // pre-existing backlog nobody has agreed to pay down yet. Raise to 'error' once it is zero.
+    "cca/max-ternary-lines": ["warn", { "maxLines": 10 }],
+
+    // The session token and username belong to AuthService. See #678.
+    "cca/no-session-key-literals": "error",
+
+    // Components go through a service; only services touch ApiClient. See #678.
+    "cca/service-layer-only": "error",
+
+    // Bracket access was a workaround for `private`, which request() no longer is. See #683.
+    "cca/no-bracket-request-access": "error",
+
+    "no-console": "error",
+
+    // The network primitives that must not be reached for outside ApiClient. See #678.
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "fetch",
+        "message": "Do not call fetch directly. Go through a service (ctx.<service>), which owns an ApiClient. ApiClient attaches the bearer token and handles 401 -> logout centrally. See #678."
+      },
+      {
+        "name": "XMLHttpRequest",
+        "message": "Do not use XMLHttpRequest. Go through a service, which owns an ApiClient. See #678."
+      },
+      {
+        // No WebSocket transport exists in this app today — reachability moved to polling
+        // (see reachability-status-service.ts). The rule stays live as a guard: holding e.g.
+        // readyState constants means holding a socket.
+        "name": "WebSocket",
+        "message": "Do not reference the WebSocket global. No WebSocket transport exists in this app; the polling services cover live status. If one is ever needed again, add a dedicated sanctioned boundary file first. See #690."
+      }
+    ]
+  },
+
+  "overrides": [
+    {
+      // The sanctioned HTTP boundary. The whole point of the rule is that this is the only file.
+      "files": ["src/services/api-client.ts"],
+      "rules": { "no-restricted-globals": "off" }
+    },
+    {
+      // The second sanctioned HTTP boundary — foreign origins only. Separate from api-client.ts
+      // because GitHub's wildcard CORS header is invalid in credentialed mode, and because a
+      // GitHub 401 must not trigger the CouchDB logout. See the file's own header comment.
+      "files": ["src/services/git/git-http.ts"],
+      "rules": { "no-restricted-globals": "off" }
+    },
+    {
+      // The third sanctioned HTTP boundary — identity providers only. Separate from api-client.ts
+      // because an IdP 401 must not trigger the CouchDB logout, because the base URL is
+      // per-request, and because it must never send credentials. See the file's own header.
+      "files": ["src/services/oidc-http.ts"],
+      "rules": { "no-restricted-globals": "off" }
+    },
+    {
+      // The logging facade every other module is required to use.
+      "files": ["src/services/log-service.ts"],
+      "rules": { "no-console": "off" }
+    },
+    {
+      // Services are the layer allowed to speak to ApiClient. They still may not name the session
+      // keys, and still may not reach for `private` members through bracket access.
+      "files": ["src/services/**/*.ts"],
+      "rules": { "cca/service-layer-only": "off" }
+    },
+    {
+      // Owns the JWT lifecycle, so it owns the storage keys. Being a service, it may also call
+      // request() — that comes from the block above. It is still held to no-bracket-request-access.
+      "files": ["src/services/auth-service.ts"],
+      "rules": { "cca/no-session-key-literals": "off" }
+    }
+  ]
+}

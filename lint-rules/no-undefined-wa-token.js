@@ -109,7 +109,6 @@ const declaredTokens = () => (cachedTokens ??= collectDeclaredTokens());
 // --wa-color-brand-fill-loud where the answer is --wa-color-text-link. The nearest *name* is
 // routinely the wrong *token*; suggesting it would reinforce the mistake this rule catches.
 
-/** @type {import('eslint').Rule.RuleModule} */
 const rule = {
   meta: {
     type: 'problem',
