@@ -29,10 +29,10 @@
 #                  GITHUB_TOKEN, and GitHub deliberately does not start workflow
 #                  runs from the repository events such a token raises — a
 #                  `release: published` trigger would never fire for it.
-#                  workflow_run is not suppressed that way, and it is also what
-#                  orders the two: this cannot start until release.yml has
-#                  finished pushing the version bump, so the deployed site
-#                  carries the version that was just released.
+#                  workflow_run is not suppressed that way. release.yml can no
+#                  longer push its version bump straight to protected main, so
+#                  this path deploys the tarball attached to the latest
+#                  published release instead of assuming main already moved.
 #
 #   by hand        `release`. The UI, or `gh release create` under a personal
 #                  token, never runs release.yml at all, so workflow_run stays
@@ -67,23 +67,46 @@ jobs:
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
+      - name: Work out which release to deploy
+        if: github.event_name != 'workflow_dispatch'
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case '${{ github.event_name }}' in
+            workflow_run) tag=$(gh release view --json tagName --jq .tagName) ;;
+            release) tag='${{ github.event.release.tag_name }}' ;;
+            *) echo "::error::Unexpected event ${{ github.event_name }}"; exit 1 ;;
+          esac
+          [ -n "$tag" ] ||
+            { echo '::error::No published release was found to deploy'; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Download and unpack the published release
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf dist /tmp/pages-release
+          mkdir -p dist /tmp/pages-release
+          gh release download '${{ steps.release.outputs.tag }}' \
+            --pattern 'couch-companion-ui-*.tar.gz' \
+            --dir /tmp/pages-release
+          tar xzf /tmp/pages-release/*.tar.gz -C dist
       - uses: actions/checkout@v7
+        if: github.event_name == 'workflow_dispatch'
         with:
-          # Which tree counts as "what was released" depends on the trigger:
-          #   workflow_run  main, where release.yml just pushed the bump — and
-          #                 NOT `workflow_run.head_sha`, which is the commit
-          #                 release.yml STARTED from, one before the version it
-          #                 released.
-          #   release       the tag itself. It is precisely what was released,
-          #                 and main may already have moved past it.
-          #   dispatch      main, this being a deliberate re-deploy of trunk.
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
+          # A manual re-deploy is deliberately a rebuild of trunk.
+          ref: main
       - uses: actions/setup-node@v7
+        if: github.event_name == 'workflow_dispatch'
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx vite build
+      - if: github.event_name == 'workflow_dispatch'
+        run: npm ci
+      - if: github.event_name == 'workflow_dispatch'
+        run: npx vite build
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist

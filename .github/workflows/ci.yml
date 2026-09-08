@@ -27,15 +27,9 @@ permissions:
 
 jobs:
   check:
-    # The version bump release.yml pushes back to main is not worth a full gate
-    # run: it changes two numbers in package.json and package-lock.json, on a
-    # tree this gate went green on minutes earlier, inside the release job (#155).
-    #
-    # Belt and braces, and deliberately so. That push already cannot start a run
-    # twice over — GitHub suppresses workflow triggers for events raised with
-    # GITHUB_TOKEN, and it honours [skip ci] in a push's head commit natively.
-    # This line is the one that keeps holding if the token is ever swapped for a
-    # PAT, which is the moment both of those stop applying.
+    # A push whose head commit explicitly says [skip ci] is not worth a full gate
+    # run. GitHub already honours that natively, but keeping the condition here
+    # makes the intent explicit and preserves it if the event source ever changes.
     #
     # `head_commit` exists only on push; on pull_request it is null, contains()
     # is false, and the job runs as it always has.
