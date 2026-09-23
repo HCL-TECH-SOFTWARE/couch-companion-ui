@@ -30,7 +30,7 @@
   "devDependencies": {
     "@open-wc/testing": "^5.0.0",
     "@types/d3": "^7.4.3",
-    "@types/node": "^26.5.0",
+    "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "^5.0.0",
     "@web/test-runner-commands": "^1.0.1",
     "happy-dom": "^20.14.0",
