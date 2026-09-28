@@ -25,7 +25,7 @@
     "@fortawesome/fontawesome-free": "7.3.0",
     "d3": "^7.9.0",
     "lit": "^3.3.3",
-    "monaco-editor": "^0.56.0"
+    "monaco-editor": "^0.57.0"
   },
   "devDependencies": {
     "@open-wc/testing": "^5.0.0",
