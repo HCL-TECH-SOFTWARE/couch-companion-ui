@@ -17,7 +17,8 @@
  * under the License.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { getContext } from "../src/context";
 import "../src/plugins/replication/repl-endpoint";
 import type { CcaReplEndpoint } from "../src/plugins/replication/repl-endpoint";
 import type { ReplEndpointChangeDetail } from "../src/plugins/replication/types";
@@ -33,6 +34,7 @@ async function mount(kind: "source" | "target"): Promise<CcaReplEndpoint> {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   document.body.innerHTML = "";
 });
 
@@ -112,10 +114,45 @@ describe("cca-repl-endpoint", () => {
     expect(el.shadowRoot!.querySelector("[data-clear-database]")).toBeNull();
   });
 
-  it("renders a disabled browse button (wired in a later task)", async () => {
+  it("enables the browse button only while a server URL is entered", async () => {
     const el = await mount("source");
-    const btn = el.shadowRoot!.querySelector("wa-button[data-browse-dbs]")!;
-    expect(btn.hasAttribute("disabled")).toBe(true);
+    const btn = () => el.shadowRoot!.querySelector("wa-button[data-browse-dbs]")!;
+    expect(btn().hasAttribute("disabled")).toBe(false);
+    el.serverUrl = "   ";
+    await el.updateComplete;
+    expect(btn().hasAttribute("disabled")).toBe(true);
+  });
+
+  it("opens the database browser with the entered server and auth", async () => {
+    const spy = vi
+      .spyOn(getContext().replication, "listDatabases")
+      .mockResolvedValue([{ db_name: "crm", doc_count: 3 }]);
+    const el = await mount("source");
+    el.auth = { Authorization: "Bearer t" };
+    await el.updateComplete;
+    el.shadowRoot!.querySelector<HTMLElement>("wa-button[data-browse-dbs]")!.click();
+    await new Promise((r) => setTimeout(r));
+    expect(spy).toHaveBeenCalledWith({
+      serverUrl: "https://a:5984",
+      headers: { Authorization: "Bearer t" },
+    });
+    const browser = el.shadowRoot!.querySelector("cca-repl-db-browser")!;
+    await browser.updateComplete;
+    expect(browser.shadowRoot!.querySelector("wa-dialog")!.hasAttribute("open")).toBe(true);
+    expect(browser.shadowRoot!.querySelector('[data-db="crm"]')).not.toBeNull();
+  });
+
+  it("surfaces a picked database as cca-endpoint-change", async () => {
+    const el = await mount("target");
+    const events = collect(el);
+    el.shadowRoot!.querySelector("cca-repl-db-browser")!.dispatchEvent(
+      new CustomEvent("cca-db-browse-pick", {
+        detail: { database: "orders" },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    expect(events).toEqual([{ kind: "target", database: "orders" }]);
   });
 
   it("renders the hint when given", async () => {

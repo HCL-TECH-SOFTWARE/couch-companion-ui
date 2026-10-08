@@ -22,6 +22,8 @@ import { customElement, property } from "lit/decorators.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/input/input.js";
 import "./repl-auth-panel.js";
+import "./repl-db-browser.js";
+import type { CcaReplDbBrowser, ReplDbBrowsePickDetail } from "./repl-db-browser.ts";
 import type { ReplAuthChangeDetail } from "./repl-auth-panel.ts";
 import type { ReplEndpointChangeDetail, ReplEndpointKind } from "./types.js";
 
@@ -135,6 +137,10 @@ export class CcaReplEndpoint extends LitElement {
     );
   }
 
+  private openBrowser() {
+    void this.shadowRoot?.querySelector<CcaReplDbBrowser>("cca-repl-db-browser")?.show();
+  }
+
   private renderClearButton() {
     if (!this.database) return nothing;
     return html`<wa-button
@@ -185,7 +191,13 @@ export class CcaReplEndpoint extends LitElement {
                 @input=${(e: Event) =>
                   this.emitChange({ database: (e.target as HTMLInputElement).value || "" })}
               ></wa-input>
-              <wa-button data-browse-dbs type="button" disabled>Browse…</wa-button>
+              <wa-button
+                data-browse-dbs
+                type="button"
+                ?disabled=${!this.serverUrl.trim()}
+                @click=${this.openBrowser}
+                >Browse…</wa-button
+              >
             </div>
             <div class="helper-label">
               Current value: ${this.database || "None"} ${this.renderClearButton()}
@@ -194,6 +206,11 @@ export class CcaReplEndpoint extends LitElement {
 
           ${this.hint ? html`<p class="hint">${this.hint}</p>` : nothing}
         </div>
+        <cca-repl-db-browser
+          .endpoint=${{ serverUrl: this.serverUrl, headers: this.auth }}
+          @cca-db-browse-pick=${(e: CustomEvent<ReplDbBrowsePickDetail>) =>
+            this.emitChange({ database: e.detail.database })}
+        ></cca-repl-db-browser>
       </div>
     `;
   }
