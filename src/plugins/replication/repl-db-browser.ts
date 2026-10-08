@@ -95,16 +95,23 @@ export class CcaReplDbBrowser extends LitElement {
   @state() private databases: DatabaseInfo[] = [];
   @state() private failure = { title: "", detail: "", corsRelated: false };
 
+  /** Identifies the latest `show()`; an older request finishing late must not overwrite it. */
+  private loadSeq = 0;
+
   @query("wa-dialog") private dialog?: HTMLElement & { open: boolean };
 
   /** Opens the dialog and (re)loads the entered server's database list. */
   async show(): Promise<void> {
     if (this.dialog) this.dialog.open = true;
     this.phase = "loading";
+    const seq = ++this.loadSeq;
     try {
-      this.databases = await getContext().replication.listDatabases(this.endpoint);
+      const databases = await getContext().replication.listDatabases(this.endpoint);
+      if (seq !== this.loadSeq) return;
+      this.databases = databases;
       this.phase = "list";
     } catch (err) {
+      if (seq !== this.loadSeq) return;
       this.failure = describeEndpointFailure(err);
       this.phase = "error";
     }

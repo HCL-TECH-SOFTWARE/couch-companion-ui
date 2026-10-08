@@ -153,4 +153,22 @@ describe("cca-repl-db-browser", () => {
     expect(el.shadowRoot!.querySelector('[data-db="crm"]')).not.toBeNull();
     expect(el.shadowRoot!.querySelector("strong")).toBeNull();
   });
+
+  it("ignores a stale response and a stale rejection from an earlier show()", async () => {
+    let resolveA!: (v: { db_name: string }[]) => void;
+    let rejectB!: (e: unknown) => void;
+    vi.spyOn(getContext().replication, "listDatabases")
+      .mockImplementationOnce(() => new Promise((res, rej) => { rejectB = rej; void res; }))
+      .mockImplementationOnce(() => new Promise((res) => { resolveA = res; }));
+    const el = await mount();
+    const first = el.show();
+    const second = el.show();
+    resolveA([{ db_name: "fresh" }]);
+    await second;
+    rejectB(new TypeError("Failed to fetch"));
+    await first;
+    await flush(el);
+    expect(el.shadowRoot!.querySelector('[data-db="fresh"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector("strong")).toBeNull();
+  });
 });
