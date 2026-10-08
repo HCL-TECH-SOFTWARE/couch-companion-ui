@@ -39,8 +39,6 @@ for (const tag of [
   "wa-tab-group",
   "wa-tab-panel",
   "wa-icon",
-  "cca-repl-source-section",
-  "cca-repl-target-section",
   "cca-repl-selector-section",
   "cca-repl-filter-section",
   "cca-repl-behavior-section",

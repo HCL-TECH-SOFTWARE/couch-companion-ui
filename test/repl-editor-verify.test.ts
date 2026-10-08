@@ -23,6 +23,7 @@ import "../src/plugins/replication/repl-editor.js";
 import type { CcaReplEditor } from "../src/plugins/replication/repl-editor.js";
 import { getContext } from "../src/context";
 import { ApiError } from "../src/services/api-error";
+import { SINGLE_SERVER_ID } from "../src/services/single-server";
 import { stubReplEditorServices, stubDoc } from "./helpers/repl-editor-stubs";
 
 class Stub extends LitElement {
@@ -40,8 +41,6 @@ for (const tag of [
   "wa-tab-group",
   "wa-tab-panel",
   "wa-icon",
-  "cca-repl-source-section",
-  "cca-repl-target-section",
   "cca-repl-selector-section",
   "cca-repl-filter-section",
   "cca-repl-behavior-section",
@@ -81,7 +80,7 @@ function documentsSection(el: CcaReplEditor) {
 }
 
 function sourceSection(el: CcaReplEditor) {
-  return el.shadowRoot?.querySelector("cca-repl-source-section") as HTMLElement | null;
+  return el.shadowRoot?.querySelector('cca-repl-endpoint[kind="source"]') as HTMLElement | null;
 }
 
 function filterSection(el: CcaReplEditor) {
@@ -109,7 +108,7 @@ describe("cca-repl-editor verify-docs wiring", () => {
     section.dispatchEvent(new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }));
     await vi.waitFor(() => expect(documentsSection(el)!.missingIds).toEqual(["d2"]));
 
-    expect(query).toHaveBeenCalledWith("s", "db", {
+    expect(query).toHaveBeenCalledWith(SINGLE_SERVER_ID, "db", {
       selector: { _id: { $in: ["d1", "d2"] } },
       scope: "raw",
       limit: 2,
@@ -127,7 +126,7 @@ describe("cca-repl-editor verify-docs wiring", () => {
     const section = documentsSection(el)!;
     section.dispatchEvent(new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }));
     await vi.waitFor(() => expect(documentsSection(el)!.missingIds).toEqual(["_design/x"]));
-    expect(getDoc).toHaveBeenCalledWith("s", "db", "_design/x");
+    expect(getDoc).toHaveBeenCalledWith(SINGLE_SERVER_ID, "db", "_design/x");
 
     section.dispatchEvent(
       new CustomEvent("cca-doc-ids-change", { detail: { docIds: ["d1"] }, bubbles: true, composed: true }),
@@ -179,8 +178,8 @@ describe("cca-repl-editor verify-docs wiring", () => {
     // deployment's one server, per Task 3 — so the db field is the only
     // remaining trigger for this staleness guard.)
     sourceSection(el)!.dispatchEvent(
-      new CustomEvent("cca-source-db-change", {
-        detail: { sourceDb: "other" },
+      new CustomEvent("cca-endpoint-change", {
+        detail: { kind: "source", database: "other" },
         bubbles: true,
         composed: true,
       }),
@@ -236,7 +235,7 @@ describe("cca-repl-editor verify-docs wiring", () => {
     expect(section.canVerify).toBe(true);
 
     const filter = filterSection(el);
-    expect(filter?.sourceServer).toBe("s");
+    expect(filter?.sourceServer).toBe(SINGLE_SERVER_ID);
     expect(filter?.sourceDb).toBe("db");
   });
 

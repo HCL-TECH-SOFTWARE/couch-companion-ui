@@ -20,7 +20,7 @@
 import { vi } from "vitest";
 import { getContext } from "../../src/context";
 import type { ReplicatorDoc } from "../../src/plugins/replication/types";
-import type { Server, DatabaseInfo } from "../../src/plugins/server-mgmt/types";
+import type { Server } from "../../src/plugins/server-mgmt/types";
 import type { PreviewResult } from "../../src/services/replication-service";
 
 /** Matches the server the old fetch mocks answered with. */
@@ -48,9 +48,7 @@ export function stubDoc(overrides: Record<string, unknown> = {}): ReplicatorDoc 
  */
 export function stubReplEditorServices(
   opts: {
-    servers?: Server[];
     doc?: ReplicatorDoc;
-    databases?: DatabaseInfo[];
     preview?: PreviewResult;
     /** Defaults to {@link STUB_SERVER}'s url, so the default fixture's "https://a/..." endpoints read as local. */
     localBaseUrl?: string;
@@ -58,13 +56,6 @@ export function stubReplEditorServices(
 ) {
   const ctx = getContext();
   return {
-    listServers: vi.spyOn(ctx.serverMgmt, "listServers").mockResolvedValue({
-      servers: opts.servers ?? [STUB_SERVER],
-      nextBookmark: "",
-    }),
-    getDatabases: vi
-      .spyOn(ctx.serverMgmt, "getDatabases")
-      .mockResolvedValue(opts.databases ?? [{ name: "db" }]),
     getReplication: vi
       .spyOn(ctx.replication, "getReplication")
       .mockResolvedValue(opts.doc ?? stubDoc()),

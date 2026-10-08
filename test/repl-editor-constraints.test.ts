@@ -45,8 +45,6 @@ for (const tag of [
   "wa-tab-group",
   "wa-tab-panel",
   "wa-icon",
-  "cca-repl-source-section",
-  "cca-repl-target-section",
   "cca-repl-selector-section",
   "cca-repl-filter-section",
   "cca-repl-behavior-section",
@@ -223,9 +221,9 @@ describe("cca-repl-editor doc_ids wiring", () => {
     await Promise.resolve();
     await el.updateComplete;
 
-    el.shadowRoot!.querySelector("cca-repl-source-section")!.dispatchEvent(
-      new CustomEvent("cca-source-db-change", {
-        detail: { sourceDb: "src" },
+    el.shadowRoot!.querySelector('cca-repl-endpoint[kind="source"]')!.dispatchEvent(
+      new CustomEvent("cca-endpoint-change", {
+        detail: { kind: "source", database: "src" },
         bubbles: true,
         composed: true,
       }),
@@ -261,24 +259,24 @@ describe("cca-repl-editor doc_ids wiring", () => {
     await Promise.resolve();
     await el.updateComplete;
 
-    el.shadowRoot!.querySelector("cca-repl-source-section")!.dispatchEvent(
-      new CustomEvent("cca-source-db-change", {
-        detail: { sourceDb: "src" },
+    el.shadowRoot!.querySelector('cca-repl-endpoint[kind="source"]')!.dispatchEvent(
+      new CustomEvent("cca-endpoint-change", {
+        detail: { kind: "source", database: "src" },
         bubbles: true,
         composed: true,
       }),
     );
-    const targetSection = el.shadowRoot!.querySelector("cca-repl-target-section")!;
+    const targetSection = el.shadowRoot!.querySelector('cca-repl-endpoint[kind="target"]')!;
     targetSection.dispatchEvent(
-      new CustomEvent("cca-target-server-url-change", {
-        detail: { targetServerUrl: "https://remote.example:6984" },
+      new CustomEvent("cca-endpoint-change", {
+        detail: { kind: "target", serverUrl: "https://remote.example:6984" },
         bubbles: true,
         composed: true,
       }),
     );
     targetSection.dispatchEvent(
-      new CustomEvent("cca-target-db-change", {
-        detail: { targetDb: "mirror" },
+      new CustomEvent("cca-endpoint-change", {
+        detail: { kind: "target", database: "mirror" },
         bubbles: true,
         composed: true,
       }),
@@ -354,9 +352,9 @@ describe("cca-repl-editor masked target credentials", () => {
     const loaded = await loadMaskedEditor();
     el = loaded.el;
 
-    el.shadowRoot!.querySelector("cca-repl-target-section")!.dispatchEvent(
-      new CustomEvent("cca-target-db-change", {
-        detail: { targetDb: "mirror" },
+    el.shadowRoot!.querySelector('cca-repl-endpoint[kind="target"]')!.dispatchEvent(
+      new CustomEvent("cca-endpoint-change", {
+        detail: { kind: "target", database: "mirror" },
         bubbles: true,
         composed: true,
       }),
@@ -486,11 +484,6 @@ describe("cca-repl-editor masked target credentials", () => {
     const originalReplication = ctx.replication;
     (ctx as unknown as { replication: ReplicationService }).replication =
       realReplication;
-    vi.spyOn(ctx.serverMgmt, "listServers").mockResolvedValue({
-      servers: [STUB_SERVER],
-      nextBookmark: "",
-    });
-    vi.spyOn(ctx.serverMgmt, "getDatabases").mockResolvedValue([{ name: "db" }]);
 
     try {
       el = document.createElement("cca-repl-editor") as CcaReplEditor;
@@ -664,11 +657,6 @@ describe("cca-repl-editor clearing a stored constraint", () => {
     const originalReplication = ctx.replication;
     (ctx as unknown as { replication: ReplicationService }).replication =
       new ReplicationService(fakeApi);
-    vi.spyOn(ctx.serverMgmt, "listServers").mockResolvedValue({
-      servers: [STUB_SERVER],
-      nextBookmark: "",
-    });
-    vi.spyOn(ctx.serverMgmt, "getDatabases").mockResolvedValue([{ name: "db" }]);
 
     try {
       el = document.createElement("cca-repl-editor") as CcaReplEditor;

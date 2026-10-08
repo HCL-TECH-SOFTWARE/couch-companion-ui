@@ -33,8 +33,6 @@ class Stub extends LitElement {
 for (const tag of [
   "wa-button",
   "wa-textarea",
-  "cca-repl-source-section",
-  "cca-repl-target-section",
   "cca-repl-selector-section",
   "cca-repl-filter-section",
   "cca-repl-behavior-section",
@@ -81,7 +79,7 @@ describe("cca-repl-editor auth wiring", () => {
     ({ el } = await mountEditor());
 
     const source = el.shadowRoot!.querySelector(
-      "cca-repl-source-section",
+      'cca-repl-endpoint[kind="source"]',
     ) as unknown as { auth: Record<string, string> };
     expect(source.auth).toEqual({ Authorization: BASIC });
     // Regression: the removed mode prop must not be wired anymore.
@@ -94,7 +92,7 @@ describe("cca-repl-editor auth wiring", () => {
     ({ el } = await mountEditor());
 
     const target = el.shadowRoot!.querySelector(
-      "cca-repl-target-section",
+      'cca-repl-endpoint[kind="target"]',
     ) as unknown as { auth: Record<string, string> };
     expect(target.auth).toEqual({ Authorization: "Bearer ttok" });
   });
@@ -143,10 +141,10 @@ describe("cca-repl-editor auth wiring", () => {
     await el.updateComplete;
 
     const source = el.shadowRoot!.querySelector(
-      "cca-repl-source-section",
+      'cca-repl-endpoint[kind="source"]',
     ) as unknown as { auth: Record<string, string> };
     const target = el.shadowRoot!.querySelector(
-      "cca-repl-target-section",
+      'cca-repl-endpoint[kind="target"]',
     ) as unknown as { auth: Record<string, string> };
     expect(source.auth).toEqual({});
     expect(target.auth).toEqual({});
@@ -171,10 +169,10 @@ describe("cca-repl-editor auth wiring", () => {
     void stubs;
 
     const source = el.shadowRoot!.querySelector(
-      "cca-repl-source-section",
+      'cca-repl-endpoint[kind="source"]',
     ) as unknown as { auth: Record<string, string> };
     const target = el.shadowRoot!.querySelector(
-      "cca-repl-target-section",
+      'cca-repl-endpoint[kind="target"]',
     ) as unknown as { auth: Record<string, string> };
     expect(source.auth).toEqual({});
     expect(target.auth).toEqual({});

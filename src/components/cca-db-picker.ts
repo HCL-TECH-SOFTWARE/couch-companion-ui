@@ -40,7 +40,7 @@ export type CcaDbChangeDetail = { database: string };
  * (a remote server's databases cannot be enumerated either).
  *
  * The component renders the control and nothing else — no label, no layout.
- * All three hosts (design-list, repl-source-section, db-list) already supply
+ * All three hosts (design-list, db-list) already supply
  * their own label and helper text in their own grid, and it has to drop into
  * each without fighting them.
  *

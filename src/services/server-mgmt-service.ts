@@ -50,7 +50,7 @@ const DBS_INFO_CHUNK_SIZE = 100;
 
 export class ServerMgmtService {
   // Cache for the bare (no-params) `listServers()` call only. Many components
-  // (design-list, db-list, repl-source-section, ...) fetch the full server
+  // (design-list, db-list, ...) fetch the full server
   // list independently on mount; this dedupes those fetches transparently.
   private _serverList: {
     at: number;
