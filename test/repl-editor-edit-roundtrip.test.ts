@@ -164,4 +164,34 @@ describe("cca-repl-editor edit round-trip", () => {
     expect(body.worker_batch_size).toBe(500);
     expect(body.http_connections).toBe(20);
   });
+
+  it("parses a loaded remote source into server + database and round-trips it", async () => {
+    const stubs = stubReplEditorServices({
+      doc: stubDoc({
+        source: {
+          url: "http://remote:5984/a%2Fb",
+          headers: { Authorization: "Basic x" },
+        },
+      }),
+    });
+    el = document.createElement("cca-repl-editor") as CcaReplEditor;
+    (el as unknown as { serverId: string }).serverId = "s";
+    (el as unknown as { replId: string }).replId = "r";
+    document.body.appendChild(el);
+    for (let i = 0; i < 3; i++) {
+      await el.updateComplete;
+      await Promise.resolve();
+    }
+    const source = el.shadowRoot!.querySelector("cca-repl-endpoint") as unknown as {
+      serverUrl: string;
+      database: string;
+    };
+    expect(source.serverUrl).toBe("http://remote:5984");
+    expect(source.database).toBe("a/b");
+    const body = await submitAndGetPutBody(el, stubs);
+    expect(body.source).toEqual({
+      url: "http://remote:5984/a%2Fb",
+      headers: { Authorization: "Basic x" },
+    });
+  });
 });

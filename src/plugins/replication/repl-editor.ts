@@ -571,12 +571,12 @@ export class CcaReplEditor extends CcaElement {
     return this.serverId && this.replId;
   }
 
-  /** True when (the local server, sourceDb) actually is the effective source endpoint. */
+  /** True when (sourceServerUrl, sourceDb) actually is the effective source endpoint — no stale URL override from a loaded doc or Source-JSON edit. */
   private sourceSelectionIsEffective(): boolean {
     return (
       !this.sourceUrlValue ||
       this.sourceUrlValue ===
-        this.endpointUrl(getContext().replication.localBaseUrl(), this.sourceDb)
+        this.endpointUrl(this.sourceServerUrl, this.sourceDb)
     );
   }
 
@@ -752,7 +752,12 @@ export class CcaReplEditor extends CcaElement {
     endpoint: string | { url?: string } | undefined,
   ): string {
     const url = typeof endpoint === "string" ? endpoint : endpoint?.url || "";
-    return url.split("/").filter(Boolean).pop() || "";
+    const raw = url.split("/").filter(Boolean).pop() || "";
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
   }
 
   private baseUrlFromEndpoint(
@@ -802,7 +807,9 @@ export class CcaReplEditor extends CcaElement {
   private endpointUrl(base: string, dbName: string): string {
     if (!base) return "";
     const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base;
-    return dbName ? `${normalizedBase}/${dbName}` : normalizedBase;
+    return dbName
+      ? `${normalizedBase}/${encodeURIComponent(dbName)}`
+      : normalizedBase;
   }
 
   /**
@@ -829,10 +836,7 @@ export class CcaReplEditor extends CcaElement {
 
   /** The source endpoint URL that would actually be saved right now. */
   private effectiveSourceUrl(): string {
-    const computed = this.endpointUrl(
-      getContext().replication.localBaseUrl(),
-      this.sourceDb,
-    );
+    const computed = this.endpointUrl(this.sourceServerUrl, this.sourceDb);
     return this.sourceUrlValue || computed;
   }
 
@@ -854,9 +858,8 @@ export class CcaReplEditor extends CcaElement {
 
   /**
    * Builds the native `_replicator` document to save — this is the only
-   * request body the editor produces now (Task 3): source is always this
-   * deployment's one server, since CouchDB 3 has no local endpoints and
-   * every endpoint, same-server or not, needs a full URL.
+   * request body the editor produces now. Both endpoints come from their
+   * effective URLs, which the safety rails have validated.
    */
   private buildReplicatorDocFromDesign() {
     const sourceUrl = this.effectiveSourceUrl();
@@ -1095,7 +1098,7 @@ export class CcaReplEditor extends CcaElement {
       // whose source endpoint isn't actually this deployment's one server) that bare db name
       // would target the wrong database on the local server instead of the real remote one. Gate
       // this the same way the filter/documents sections already do.
-      if (!this.sourceSelectionIsEffective()) {
+      if (!this.sourceServerId() || !this.sourceSelectionIsEffective()) {
         return;
       }
 
@@ -1226,6 +1229,12 @@ export class CcaReplEditor extends CcaElement {
     const blocking: string[] = [];
     const warnings: string[] = [];
 
+    const sourceServerUrl = this.sourceServerUrl.trim();
+    if (!sourceServerUrl) {
+      blocking.push("Enter a Source Server URL before saving.");
+    } else if (!this.isValidUrl(sourceServerUrl)) {
+      blocking.push("Source Server URL is invalid.");
+    }
     if (!this.sourceDb) {
       blocking.push("Select a source database before preview or save.");
     } else {
@@ -1247,9 +1256,9 @@ export class CcaReplEditor extends CcaElement {
     }
     const targetServerUrl = this.targetServerUrl.trim();
     if (!targetServerUrl) {
-      blocking.push("Enter a target URL before saving.");
+      blocking.push("Enter a Target Server URL before saving.");
     } else if (!this.isValidUrl(targetServerUrl)) {
-      blocking.push("Target URL is invalid.");
+      blocking.push("Target Server URL is invalid.");
     } else {
       // A loaded target endpoint's credentials come back masked ("***").
       // ReplicationService.updateReplication's resolveEndpoint splices the
@@ -1400,12 +1409,15 @@ export class CcaReplEditor extends CcaElement {
   }
 
   private renderFilterSection() {
-    const sourceIsEffective = this.sourceSelectionIsEffective();
+    // Filter lookups run against the local server — only offer them for a local, effective source.
+    const sourceServer = this.sourceSelectionIsEffective()
+      ? this.sourceServerId()
+      : "";
     return html`
       <cca-repl-filter-section
         .filterFn=${this.filterFn}
-        .sourceServer=${sourceIsEffective ? this.sourceServerId() : ""}
-        .sourceDb=${sourceIsEffective ? this.sourceDb : ""}
+        .sourceServer=${sourceServer}
+        .sourceDb=${sourceServer ? this.sourceDb : ""}
         @cca-filter-fn-change=${this.handleFilterFnChange}
       ></cca-repl-filter-section>
     `;
