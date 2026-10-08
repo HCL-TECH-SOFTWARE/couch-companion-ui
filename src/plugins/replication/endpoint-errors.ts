@@ -43,7 +43,7 @@ export function describeEndpointFailure(err: unknown): {
   if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
     return {
       title: "The server refused the request",
-      detail: describeDbAccessError(err),
+      detail: `${describeDbAccessError(err)} Check the credentials entered in the Authentication dialog for this endpoint.`,
       corsRelated: false,
     };
   }

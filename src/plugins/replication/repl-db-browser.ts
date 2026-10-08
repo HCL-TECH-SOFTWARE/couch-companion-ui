@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { html, css, LitElement } from "lit";
+import { html, css, LitElement, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
 import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
@@ -151,17 +151,22 @@ export class CcaReplDbBrowser extends LitElement {
     </ul>`;
   }
 
+  private renderCorsLinks() {
+    if (!this.failure.corsRelated) return nothing;
+    return html`<p class="help-links">
+      <a href=${CORS_HELP_URL} target="_blank" rel="noopener noreferrer">How to fix this</a>
+      ·
+      <a href=${COUCHDB_CORS_DOCS_URL} target="_blank" rel="noopener noreferrer"
+        >CouchDB CORS documentation</a
+      >
+    </p>`;
+  }
+
   private renderError() {
     return html`<div class="failure">
       <strong>${this.failure.title}</strong>
       <p>${this.failure.detail}</p>
-      <p class="help-links">
-        <a href=${CORS_HELP_URL} target="_blank" rel="noopener noreferrer">How to fix this</a>
-        ·
-        <a href=${COUCHDB_CORS_DOCS_URL} target="_blank" rel="noopener noreferrer"
-          >CouchDB CORS documentation</a
-        >
-      </p>
+      ${this.renderCorsLinks()}
     </div>`;
   }
 

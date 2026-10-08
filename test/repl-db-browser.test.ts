@@ -32,6 +32,9 @@ describe("describeEndpointFailure", () => {
   it("tells a 401 as a credentials story, not CORS", () => {
     const f = describeEndpointFailure(new ApiError(401, "Unauthorized", {}));
     expect(f.detail).toMatch(/administrator/i);
+    expect(f.detail).toContain(
+      "Check the credentials entered in the Authentication dialog for this endpoint.",
+    );
     expect(f.corsRelated).toBe(false);
   });
 
@@ -108,7 +111,7 @@ describe("cca-repl-db-browser", () => {
     expect(el.shadowRoot!.textContent).toContain("This server has no databases.");
   });
 
-  it("explains a 401 with the credentials story and both help links", async () => {
+  it("explains a 401 with the credentials story and no CORS links", async () => {
     vi.spyOn(getContext().replication, "listDatabases").mockRejectedValue(
       new ApiError(401, "Unauthorized", {}),
     );
@@ -118,8 +121,8 @@ describe("cca-repl-db-browser", () => {
     const root = el.shadowRoot!;
     expect(root.querySelector("strong")!.textContent).toBe("The server refused the request");
     expect(root.textContent).toMatch(/administrator/i);
-    expect(root.querySelector(`a[href="${CORS_HELP_URL}"]`)).not.toBeNull();
-    expect(root.querySelector(`a[href="${COUCHDB_CORS_DOCS_URL}"]`)).not.toBeNull();
+    expect(root.textContent).toContain("Authentication dialog");
+    expect(root.querySelector("a")).toBeNull();
   });
 
   it("explains a TypeError as CORS-or-unreachable with the docs links", async () => {
