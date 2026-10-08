@@ -20,6 +20,7 @@
 import { html, css, LitElement } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import './repl-filter-picker.js';
+import type { ReplEndpointRequest } from './types.js';
 
 @customElement('cca-repl-filter-section')
 export class CcaReplFilterSection extends LitElement {
@@ -63,7 +64,7 @@ export class CcaReplFilterSection extends LitElement {
 
   @property({ type: String }) filterFn = '';
   /** Source server/database of the replication — the picker browses these. */
-  @property({ type: String }) sourceServer = '';
+  @property({ attribute: false }) endpoint: ReplEndpointRequest = { serverUrl: '', headers: {} };
   @property({ type: String }) sourceDb = '';
   @state() private _pickerOpen = false;
 
@@ -118,7 +119,7 @@ export class CcaReplFilterSection extends LitElement {
   }
 
   render() {
-    const canBrowse = Boolean(this.sourceServer && this.sourceDb);
+    const canBrowse = Boolean(this.endpoint.serverUrl.trim() && this.sourceDb);
     return html`
       <div class="section-body">
         <div class="row">
@@ -161,7 +162,7 @@ export class CcaReplFilterSection extends LitElement {
         </div>
         <cca-repl-filter-picker
           .open=${this._pickerOpen}
-          .serverId=${this.sourceServer}
+          .endpoint=${this.endpoint}
           .dbName=${this.sourceDb}
           @cca-filter-picked=${this._onPicked}
           @cca-filter-pick-cancel=${this._onPickCancel}></cca-repl-filter-picker>

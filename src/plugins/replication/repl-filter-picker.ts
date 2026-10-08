@@ -26,6 +26,8 @@ import '@awesome.me/webawesome/dist/components/button/button.js';
 import '@awesome.me/webawesome/dist/components/spinner/spinner.js';
 import { getContext } from '../../context.js';
 import { toast } from '../../components/cca-toast.js';
+import type { ReplEndpointRequest } from './types.js';
+import { describeEndpointFailure } from './endpoint-errors.js';
 
 /**
  * Dialog that picks a CouchDB replication filter from the SOURCE database's
@@ -70,7 +72,8 @@ export class CcaReplFilterPicker extends LitElement {
   `;
 
   @property({ type: Boolean, reflect: true }) open = false;
-  @property({ type: String }) serverId = '';
+  /** The source server (URL + auth headers) whose design documents are browsed. */
+  @property({ attribute: false }) endpoint: ReplEndpointRequest = { serverUrl: '', headers: {} };
   @property({ type: String }) dbName = '';
 
   @state() private _ddocs: string[] = [];
@@ -93,11 +96,10 @@ export class CcaReplFilterPicker extends LitElement {
   private async _loadDdocs() {
     this._loadingDdocs = true;
     try {
-      const docs = await getContext().designMgmt.listDesignDocs(this.serverId, this.dbName);
-      this._ddocs = docs.map((d) => d.ddoc_id);
+      this._ddocs = await getContext().replication.listDesignDocIds(this.endpoint, this.dbName);
     } catch (err) {
       this._ddocs = [];
-      toast(err instanceof Error ? err.message : 'Failed to load design documents', 'error');
+      toast(describeEndpointFailure(err).detail, 'error');
     } finally {
       this._loadingDdocs = false;
     }
@@ -110,10 +112,9 @@ export class CcaReplFilterPicker extends LitElement {
     if (!ddocId) return;
     this._loadingFilters = true;
     try {
-      const ddoc = await getContext().designMgmt.getDesignDoc(this.serverId, this.dbName, ddocId);
-      this._filters = Object.keys((ddoc.filters as Record<string, unknown> | undefined) ?? {});
+      this._filters = await getContext().replication.getFilterNames(this.endpoint, this.dbName, ddocId);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to load design document', 'error');
+      toast(describeEndpointFailure(err).detail, 'error');
     } finally {
       this._loadingFilters = false;
     }

@@ -23,7 +23,6 @@ import { CcaElement } from "../../components/cca-element.js";
 import { getContext } from "../../context.js";
 import { toast } from "../../components/cca-toast.js";
 import { getLogger } from "../../services/log-service.js";
-import { ApiError } from "../../services/api-error.js";
 import { SINGLE_SERVER_ID, serverKey } from "../../services/single-server.js";
 import "../../webawesome.js";
 import {
@@ -46,7 +45,9 @@ import "./repl-issues-panel.js";
 import type {
   ReplicatorDoc,
   ReplEndpointChangeDetail,
+  ReplEndpointRequest,
 } from "./types.js";
+import { describeEndpointFailure, CORS_HELP_URL } from "./endpoint-errors.js";
 import {
   buildReplicatorCurl,
   CREDENTIAL_PLACEHOLDER,
@@ -238,6 +239,8 @@ export class CcaReplEditor extends CcaElement {
   @state() private preview: PreviewResult | null = null;
   @state() private submitting = false;
   @state() private error = "";
+  /** Help link shown beside `error` (the CORS guide) — "" when the failure has none. */
+  @state() private errorHelpUrl = "";
   @state() private loading = false;
   @state() private activeTab: "design" | "source" = "design";
   @state() private sourceDocJson = "";
@@ -394,7 +397,29 @@ export class CcaReplEditor extends CcaElement {
     }
   }
 
-  /** `SINGLE_SERVER_ID` while the source server field points at this deployment's own server, else "" — which the selector/filter/documents children already treat as "unavailable". */
+  /** The source server and auth as the endpoint-routed service calls take them. */
+  private sourceEndpoint(): ReplEndpointRequest {
+    return {
+      serverUrl: this.sourceServerUrl,
+      headers: this.cleanAuthObject(this.sourceAuth),
+    };
+  }
+
+  /** The source is complete enough to query: a server, a database, and no stale URL override. */
+  private sourceIsUsable(): boolean {
+    return Boolean(
+      this.sourceServerUrl.trim() &&
+        this.sourceDb &&
+        this.sourceSelectionIsEffective(),
+    );
+  }
+
+  /**
+   * `SINGLE_SERVER_ID` while the source server field points at this deployment's own server,
+   * else "". Only the Mango helpers inside the selector section still need it: they read and
+   * write through the local dbMgmt service by (serverId, database), so a remote source must
+   * leave them off. Everything that queries the source goes through {@link sourceEndpoint}.
+   */
   private sourceServerId(): string {
     return this.inferServerIdFromUrl(this.sourceServerUrl);
   }
@@ -494,21 +519,16 @@ export class CcaReplEditor extends CcaElement {
   }
 
   private async handleVerifyDocs() {
-    if (
-      !this.sourceServerId() ||
-      !this.sourceDb ||
-      this.docIds.length === 0 ||
-      !this.sourceSelectionIsEffective()
-    )
-      return;
+    if (!this.sourceIsUsable() || this.docIds.length === 0) return;
     const ids = [...this.docIds];
-    const server = this.sourceServerId();
+    const serverUrl = this.sourceServerUrl;
+    const endpoint = this.sourceEndpoint();
     const db = this.sourceDb;
     // If the source or the doc list changed while this verify was in
     // flight, the results below no longer describe the current form
     // state — drop them instead of clobbering a newer reset/verify.
     const stillCurrent = () =>
-      server === this.sourceServerId() &&
+      serverUrl === this.sourceServerUrl &&
       db === this.sourceDb &&
       ids.length === this.docIds.length &&
       ids.every((id, i) => id === this.docIds[i]);
@@ -520,21 +540,19 @@ export class CcaReplEditor extends CcaElement {
       const designIds = ids.filter((id) => id.startsWith("_design/"));
       const regularIds = ids.filter((id) => !id.startsWith("_design/"));
       if (regularIds.length > 0) {
-        const resp = await getContext().dbMgmt.queryDocuments(server, db, {
-          selector: { _id: { $in: regularIds } },
-          scope: "raw",
-          limit: regularIds.length,
-        });
-        for (const doc of resp.documents ?? []) {
+        const docs = await getContext().replication.findDocs(
+          endpoint,
+          db,
+          { _id: { $in: regularIds } },
+          regularIds.length,
+        );
+        for (const doc of docs) {
           if (typeof doc._id === "string") found.add(doc._id);
         }
       }
       for (const id of designIds) {
-        try {
-          await getContext().dbMgmt.getDoc(server, db, id);
+        if (await getContext().replication.docExists(endpoint, db, id)) {
           found.add(id);
-        } catch (err) {
-          if (!(err instanceof ApiError && err.status === 404)) throw err;
         }
       }
       if (stillCurrent()) {
@@ -545,10 +563,7 @@ export class CcaReplEditor extends CcaElement {
       // failure must not clobber a newer reset/verify with a stray toast.
       if (stillCurrent()) {
         this.missingDocIds = null;
-        toast(
-          err instanceof Error ? err.message : "Failed to verify documents",
-          "error",
-        );
+        toast(describeEndpointFailure(err).detail, "error");
       }
     } finally {
       this.verifyingDocs = false;
@@ -649,6 +664,7 @@ export class CcaReplEditor extends CcaElement {
   private async loadReplication() {
     this.loading = true;
     this.error = "";
+    this.errorHelpUrl = "";
     try {
       const doc = await getContext().replication.getReplication(
         this.serverId,
@@ -1016,6 +1032,7 @@ export class CcaReplEditor extends CcaElement {
 
     this.syncingFromSource = true;
     this.error = "";
+    this.errorHelpUrl = "";
 
     const sourceUrl =
       typeof parsed.source === "string"
@@ -1089,21 +1106,15 @@ export class CcaReplEditor extends CcaElement {
 
   private async handlePreview() {
     this.error = "";
+    this.errorHelpUrl = "";
     try {
       if (this.activeTab === "source" && !this.applySourceToDesign()) {
         return;
       }
-      // Preview queries the LOCAL server's `_find`/`_all_docs` directly against `sourceDb` — see
-      // ReplicationService.previewReplication. For a legacy/remote source (an edit-mode doc
-      // whose source endpoint isn't actually this deployment's one server) that bare db name
-      // would target the wrong database on the local server instead of the real remote one. Gate
-      // this the same way the filter/documents sections already do.
-      if (!this.sourceServerId() || !this.sourceSelectionIsEffective()) {
-        return;
-      }
+      if (!this.sourceDb) return;
 
       const body: any = {
-        source_server_id: this.sourceServerId(),
+        endpoint: this.sourceEndpoint(),
         source_db: this.sourceDb,
       };
       const selector = this.selectorStringOrUndefined(this.selectorJson);
@@ -1119,16 +1130,20 @@ export class CcaReplEditor extends CcaElement {
       }
       this.preview = await getContext().replication.previewReplication(body);
     } catch (err) {
-      this.error =
-        err instanceof SyntaxError
-          ? "Invalid JSON in selector"
-          : "Preview failed";
+      if (err instanceof SyntaxError) {
+        this.error = "Invalid JSON in selector";
+        return;
+      }
+      const failure = describeEndpointFailure(err);
+      this.error = `${failure.title}: ${failure.detail}`;
+      this.errorHelpUrl = failure.corsRelated ? CORS_HELP_URL : "";
     }
   }
 
   private async handleSubmit(e: Event) {
     e.preventDefault();
     this.error = "";
+    this.errorHelpUrl = "";
     // Rails must run against the state that will actually be sent. On the
     // Source tab, the textarea's edits (including anything that changes
     // what buildReplicatorDocFromDesign would produce, e.g. the masked-
@@ -1178,9 +1193,7 @@ export class CcaReplEditor extends CcaElement {
     clearHeaderActions();
     const rails = this.computeSafetyRails();
     const canPreview =
-      this.sourceServerId().length > 0 &&
-      this.sourceDb.length > 0 &&
-      this.sourceSelectionIsEffective() &&
+      this.sourceIsUsable() &&
       !rails.blocking.some((msg) => msg.includes("Selector JSON is invalid"));
     const canSave = rails.blocking.length === 0;
     addHeaderActions([
@@ -1375,6 +1388,7 @@ export class CcaReplEditor extends CcaElement {
       <cca-repl-selector-section
         .selectorJson=${this.selectorJson}
         .dbName=${this.sourceDb}
+        .endpoint=${this.sourceEndpoint()}
         .serverId=${this.sourceServerId()}
         @cca-selector-json-change=${this.handleSelectorJsonChange}
       ></cca-repl-selector-section>
@@ -1409,15 +1423,12 @@ export class CcaReplEditor extends CcaElement {
   }
 
   private renderFilterSection() {
-    // Filter lookups run against the local server — only offer them for a local, effective source.
-    const sourceServer = this.sourceSelectionIsEffective()
-      ? this.sourceServerId()
-      : "";
+    // Filter lookups follow the source endpoint, but only when it is the effective source.
     return html`
       <cca-repl-filter-section
         .filterFn=${this.filterFn}
-        .sourceServer=${sourceServer}
-        .sourceDb=${sourceServer ? this.sourceDb : ""}
+        .endpoint=${this.sourceEndpoint()}
+        .sourceDb=${this.sourceSelectionIsEffective() ? this.sourceDb : ""}
         @cca-filter-fn-change=${this.handleFilterFnChange}
       ></cca-repl-filter-section>
     `;
@@ -1427,7 +1438,7 @@ export class CcaReplEditor extends CcaElement {
     return html`
       <cca-repl-documents-section
         .docIds=${this.docIds}
-        .canVerify=${Boolean(this.sourceServerId() && this.sourceDb) && this.sourceSelectionIsEffective()}
+        .canVerify=${this.sourceIsUsable()}
         .verifying=${this.verifyingDocs}
         .missingIds=${this.missingDocIds}
         @cca-doc-ids-change=${this.handleDocIdsChange}
@@ -1595,7 +1606,19 @@ export class CcaReplEditor extends CcaElement {
             <div class="panel">
               <form id="replication-editor-form" @submit=${this.handleSubmit}>
                 ${this.activeTab === "design" ? this.renderDesignTab() : this.renderSourceTab()}
-                ${this.error ? html`<p class="error">${this.error}</p>` : ""}
+                ${this.error
+                  ? html`<p class="error">
+                      ${this.error}
+                      ${this.errorHelpUrl
+                        ? html` <a
+                            href=${this.errorHelpUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            >How to fix this</a
+                          >`
+                        : ""}
+                    </p>`
+                  : ""}
                 ${this.renderPreview()}
               </form>
             </div>

@@ -18,6 +18,7 @@
  */
 
 import { ApiClient } from './api-client.js';
+import { ApiError } from './api-error.js';
 import { SINGLE_SERVER_ID, labelFor, serverKey } from './single-server.js';
 import { fetchDatabaseInfos } from './dbs-info.js';
 import type { DatabaseInfo } from '../plugins/server-mgmt/types.js';
@@ -40,7 +41,7 @@ const PREVIEW_FIND_LIMIT = 101;
 
 /** Request driving a client-side {@link ReplicationService.previewReplication} estimate. */
 export interface PreviewRequest {
-  source_server_id: string;
+  endpoint: ReplEndpointRequest;
   source_db: string;
   selector?: Record<string, unknown> | null;
   filter?: string | null;
@@ -323,6 +324,48 @@ export class ReplicationService {
     );
   }
 
+  /** Ids of the design documents in `db` on whatever server `endpoint` names. */
+  async listDesignDocIds(endpoint: ReplEndpointRequest, db: string): Promise<string[]> {
+    const resp = await this.endpointRequest<{ rows?: Array<{ id: string }> }>(
+      endpoint, 'GET', `${dbPath(db)}/_design_docs`,
+    );
+    return (resp.rows ?? []).map((row) => row.id);
+  }
+
+  /** Names of the filter functions of a design doc (`_design/app` or `app`). */
+  async getFilterNames(endpoint: ReplEndpointRequest, db: string, ddocId: string): Promise<string[]> {
+    const name = seg(ddocId.replace(/^_design\//, ''));
+    const ddoc = await this.endpointRequest<{ filters?: Record<string, string> }>(
+      endpoint, 'GET', `${dbPath(db)}/_design/${name}`,
+    );
+    return Object.keys(ddoc.filters ?? {});
+  }
+
+  /** Runs a Mango `_find` against `db` on the endpoint's server and returns the matching docs. */
+  async findDocs(
+    endpoint: ReplEndpointRequest,
+    db: string,
+    selector: Record<string, unknown>,
+    limit: number,
+  ): Promise<Array<Record<string, unknown>>> {
+    const resp = await this.endpointRequest<{ docs?: Array<Record<string, unknown>> }>(
+      endpoint, 'POST', `${dbPath(db)}/_find`, { selector, limit },
+    );
+    return resp.docs ?? [];
+  }
+
+  /** Whether document `id` exists in `db` on the endpoint's server: false on 404, any other failure rethrows. */
+  async docExists(endpoint: ReplEndpointRequest, db: string, id: string): Promise<boolean> {
+    const path = `${dbPath(db)}/${id.split('/').map(seg).join('/')}`;
+    try {
+      await this.endpointRequest(endpoint, 'GET', path);
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return false;
+      throw err;
+    }
+  }
+
   /**
    * Reads every replication document: `GET /_replicator/_all_docs?include_docs=true` (design
    * docs dropped), joined against `GET /_scheduler/docs` on `doc_id` for live state, error and
@@ -469,7 +512,8 @@ export class ReplicationService {
       estimatedDocCount = req.doc_ids.length;
       sampleDocIds = req.doc_ids.slice(0, PREVIEW_SAMPLE_SIZE);
     } else if (req.selector) {
-      const resp = await this.api.request<{ docs?: Array<{ _id: string }> }>(
+      const resp = await this.endpointRequest<{ docs?: Array<{ _id: string }> }>(
+        req.endpoint,
         'POST',
         `${dbPath(req.source_db)}/_find`,
         { selector: req.selector, fields: ['_id'], limit: PREVIEW_FIND_LIMIT },
@@ -481,7 +525,8 @@ export class ReplicationService {
         warnings.push(`At least ${docs.length} documents match; the preview stopped counting at the cap, so this is a lower bound.`);
       }
     } else {
-      const resp = await this.api.request<{ total_rows: number; rows?: Array<{ id: string }> }>(
+      const resp = await this.endpointRequest<{ total_rows: number; rows?: Array<{ id: string }> }>(
+        req.endpoint,
         'GET',
         `${dbPath(req.source_db)}/_all_docs?limit=${PREVIEW_SAMPLE_SIZE}`,
       );

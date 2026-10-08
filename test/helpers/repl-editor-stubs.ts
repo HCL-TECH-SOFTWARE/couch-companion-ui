@@ -70,6 +70,11 @@ export function stubReplEditorServices(
       .mockResolvedValue(
         opts.preview ?? { estimated_doc_count: 0, sample_doc_ids: [] },
       ),
+    listDatabases: vi.spyOn(ctx.replication, "listDatabases").mockResolvedValue([]),
+    listDesignDocIds: vi.spyOn(ctx.replication, "listDesignDocIds").mockResolvedValue([]),
+    getFilterNames: vi.spyOn(ctx.replication, "getFilterNames").mockResolvedValue([]),
+    findDocs: vi.spyOn(ctx.replication, "findDocs").mockResolvedValue([]),
+    docExists: vi.spyOn(ctx.replication, "docExists").mockResolvedValue(true),
     localBaseUrl: vi
       .spyOn(ctx.replication, "localBaseUrl")
       .mockReturnValue(opts.localBaseUrl ?? STUB_SERVER.url),

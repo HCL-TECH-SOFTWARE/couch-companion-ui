@@ -21,9 +21,6 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { LitElement } from "lit";
 import "../src/plugins/replication/repl-editor.js";
 import type { CcaReplEditor } from "../src/plugins/replication/repl-editor.js";
-import { getContext } from "../src/context";
-import { ApiError } from "../src/services/api-error";
-import { SINGLE_SERVER_ID } from "../src/services/single-server";
 import { stubReplEditorServices, stubDoc } from "./helpers/repl-editor-stubs";
 
 class Stub extends LitElement {
@@ -54,8 +51,8 @@ for (const tag of [
 
 async function loadEditor(
   opts: { docIds?: string[]; sourceUrl?: string } = {},
-): Promise<{ el: CcaReplEditor }> {
-  stubReplEditorServices({
+): Promise<{ el: CcaReplEditor; stubs: ReturnType<typeof stubReplEditorServices> }> {
+  const stubs = stubReplEditorServices({
     doc: stubDoc({
       source: { url: opts.sourceUrl ?? "https://a/db", headers: {} },
       doc_ids: opts.docIds ?? ["d1", "d2"],
@@ -70,7 +67,7 @@ async function loadEditor(
   await el.updateComplete;
   await Promise.resolve();
   await el.updateComplete;
-  return { el };
+  return { el, stubs };
 }
 
 function documentsSection(el: CcaReplEditor) {
@@ -85,8 +82,17 @@ function sourceSection(el: CcaReplEditor) {
 
 function filterSection(el: CcaReplEditor) {
   return el.shadowRoot?.querySelector("cca-repl-filter-section") as
-    | (HTMLElement & { sourceServer: string; sourceDb: string })
+    | (HTMLElement & { endpoint: { serverUrl: string; headers: Record<string, string> }; sourceDb: string })
     | null;
+}
+
+const LOCAL_EP = { serverUrl: "https://a", headers: {} };
+const REMOTE_EP = { serverUrl: "https://unregistered-host", headers: {} };
+
+function verify(el: CcaReplEditor) {
+  documentsSection(el)!.dispatchEvent(
+    new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }),
+  );
 }
 
 describe("cca-repl-editor verify-docs wiring", () => {
@@ -97,36 +103,27 @@ describe("cca-repl-editor verify-docs wiring", () => {
   });
 
   it("verifies regular ids via one Mango query and flags the missing ones", async () => {
-    const query = vi
-      .spyOn(getContext().dbMgmt, "queryDocuments")
-      .mockResolvedValue({ documents: [{ _id: "d1" }] });
-    const loaded = await loadEditor(); // edit-mode mount: docIds d1,d2 / source s/db
+    const loaded = await loadEditor(); // edit-mode mount: docIds d1,d2 / source https://a + db
     el = loaded.el;
-    const section = documentsSection(el)!;
-    expect(section.canVerify).toBe(true);
+    loaded.stubs.findDocs.mockResolvedValue([{ _id: "d1" }]);
+    expect(documentsSection(el)!.canVerify).toBe(true);
 
-    section.dispatchEvent(new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }));
+    verify(el);
     await vi.waitFor(() => expect(documentsSection(el)!.missingIds).toEqual(["d2"]));
 
-    expect(query).toHaveBeenCalledWith(SINGLE_SERVER_ID, "db", {
-      selector: { _id: { $in: ["d1", "d2"] } },
-      scope: "raw",
-      limit: 2,
-    });
+    expect(loaded.stubs.findDocs).toHaveBeenCalledWith(LOCAL_EP, "db", { _id: { $in: ["d1", "d2"] } }, 2);
   });
 
-  it("checks _design ids via getDoc (404 = missing) and resets results when the list changes", async () => {
-    vi.spyOn(getContext().dbMgmt, "queryDocuments").mockResolvedValue({ documents: [{ _id: "d1" }] });
-    const getDoc = vi
-      .spyOn(getContext().dbMgmt, "getDoc")
-      .mockRejectedValue(new ApiError(404, "not found"));
+  it("checks _design ids via docExists (false = missing) and resets results when the list changes", async () => {
     const loaded = await loadEditor({ docIds: ["d1", "_design/x"] });
     el = loaded.el;
+    loaded.stubs.findDocs.mockResolvedValue([{ _id: "d1" }]);
+    loaded.stubs.docExists.mockResolvedValue(false);
 
     const section = documentsSection(el)!;
-    section.dispatchEvent(new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }));
+    verify(el);
     await vi.waitFor(() => expect(documentsSection(el)!.missingIds).toEqual(["_design/x"]));
-    expect(getDoc).toHaveBeenCalledWith(SINGLE_SERVER_ID, "db", "_design/x");
+    expect(loaded.stubs.docExists).toHaveBeenCalledWith(LOCAL_EP, "db", "_design/x");
 
     section.dispatchEvent(
       new CustomEvent("cca-doc-ids-change", { detail: { docIds: ["d1"] }, bubbles: true, composed: true }),
@@ -136,47 +133,34 @@ describe("cca-repl-editor verify-docs wiring", () => {
   });
 
   it("sets verifying on the section while the check is in flight", async () => {
-    let resolveQuery!: (value: { documents: Record<string, unknown>[] }) => void;
-    vi.spyOn(getContext().dbMgmt, "queryDocuments").mockReturnValue(
-      new Promise((resolve) => {
-        resolveQuery = resolve;
-      }),
-    );
     const loaded = await loadEditor();
     el = loaded.el;
-    const section = documentsSection(el)!;
+    let resolveQuery!: (value: Record<string, unknown>[]) => void;
+    loaded.stubs.findDocs.mockReturnValue(new Promise((resolve) => { resolveQuery = resolve; }));
 
-    section.dispatchEvent(new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }));
+    verify(el);
     await vi.waitFor(() =>
       expect((documentsSection(el) as unknown as { verifying: boolean }).verifying).toBe(true),
     );
 
-    resolveQuery({ documents: [{ _id: "d1" }, { _id: "d2" }] });
+    resolveQuery([{ _id: "d1" }, { _id: "d2" }]);
     await vi.waitFor(() =>
       expect((documentsSection(el) as unknown as { verifying: boolean }).verifying).toBe(false),
     );
   });
 
   it("drops stale verify results when the source db changes while the check is in flight", async () => {
-    let resolveQuery!: (value: { documents: Record<string, unknown>[] }) => void;
-    vi.spyOn(getContext().dbMgmt, "queryDocuments").mockReturnValue(
-      new Promise((resolve) => {
-        resolveQuery = resolve;
-      }),
-    );
     const loaded = await loadEditor();
     el = loaded.el;
-    const section = documentsSection(el)!;
+    let resolveQuery!: (value: Record<string, unknown>[]) => void;
+    loaded.stubs.findDocs.mockReturnValue(new Promise((resolve) => { resolveQuery = resolve; }));
 
-    section.dispatchEvent(new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }));
+    verify(el);
     await vi.waitFor(() =>
       expect((documentsSection(el) as unknown as { verifying: boolean }).verifying).toBe(true),
     );
 
-    // Source db changes while the verify request is still in flight. (The
-    // source server itself can no longer change — it's always this
-    // deployment's one server, per Task 3 — so the db field is the only
-    // remaining trigger for this staleness guard.)
+    // Source db changes while the verify request is still in flight.
     sourceSection(el)!.dispatchEvent(
       new CustomEvent("cca-endpoint-change", {
         detail: { kind: "source", database: "other" },
@@ -188,7 +172,7 @@ describe("cca-repl-editor verify-docs wiring", () => {
     expect(documentsSection(el)!.missingIds).toBeNull();
 
     // The stale request finally resolves; its results must not clobber the reset.
-    resolveQuery({ documents: [{ _id: "d1" }] });
+    resolveQuery([{ _id: "d1" }]);
     await vi.waitFor(() =>
       expect((documentsSection(el) as unknown as { verifying: boolean }).verifying).toBe(false),
     );
@@ -196,65 +180,50 @@ describe("cca-repl-editor verify-docs wiring", () => {
     expect(documentsSection(el)!.missingIds).toBeNull();
   });
 
-  it("disables canVerify and clears the filter-section source when the loaded source isn't the local server", async () => {
-    // The saved doc's source url ("https://unregistered-host/db") doesn't
-    // match this deployment's one server (stubbed to "https://a"), so
-    // (sourceServer, sourceDb) — which still resolve to the edit-mode
-    // server "s" / db "db" for other API calls — are NOT the effective
-    // source endpoint. Verify and Browse must be disabled rather than
-    // silently targeting the wrong db on the real local server.
+  it("enables canVerify and points the filter section at a remote source", async () => {
     const loaded = await loadEditor({ sourceUrl: "https://unregistered-host/db" });
     el = loaded.el;
 
-    const section = documentsSection(el)!;
-    expect(section.canVerify).toBe(false);
-
+    expect(documentsSection(el)!.canVerify).toBe(true);
     const filter = filterSection(el);
-    expect(filter?.sourceServer).toBe("");
-    expect(filter?.sourceDb).toBe("");
-  });
-
-  it("guards handleVerifyDocs itself: no query fires for an unregistered raw-URL source", async () => {
-    const query = vi.spyOn(getContext().dbMgmt, "queryDocuments");
-    const loaded = await loadEditor({ sourceUrl: "https://unregistered-host/db" });
-    el = loaded.el;
-
-    const section = documentsSection(el)!;
-    section.dispatchEvent(new CustomEvent("cca-verify-docs", { bubbles: true, composed: true }));
-    await el.updateComplete;
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(query).not.toHaveBeenCalled();
-  });
-
-  it("keeps canVerify true and the filter-section source populated when the source url matches the local server/db (existing edit-mode fixture)", async () => {
-    const loaded = await loadEditor(); // default sourceUrl "https://a/db" === local base ("https://a") + "/db"
-    el = loaded.el;
-
-    const section = documentsSection(el)!;
-    expect(section.canVerify).toBe(true);
-
-    const filter = filterSection(el);
-    expect(filter?.sourceServer).toBe(SINGLE_SERVER_ID);
+    expect(filter?.endpoint).toEqual(REMOTE_EP);
     expect(filter?.sourceDb).toBe("db");
   });
 
-  // Finding #7 of the Phase 4 final-review wave: ReplicationService.previewReplication runs
-  // `_find`/`_all_docs` against the LOCAL server using the bare `sourceDb` name. For a legacy
-  // remote-source doc (source url not this deployment's own server), that would silently query
-  // the wrong database on the local server instead of the real remote one. handlePreview must be
-  // gated the same way handleVerifyDocs already is.
-  it("does not query the local server for a preview when the loaded source isn't the local server (guards handlePreview itself)", async () => {
+  it("verifies against the remote endpoint, never the local server", async () => {
     const loaded = await loadEditor({ sourceUrl: "https://unregistered-host/db" });
     el = loaded.el;
-    // Spied AFTER mount: stubReplEditorServices (inside loadEditor) already replaced
-    // ctx.replication.previewReplication with its own mock — spying now wraps that live method
-    // instead of a copy that handlePreview would no longer be calling through.
-    const preview = vi.spyOn(getContext().replication, "previewReplication");
+    loaded.stubs.findDocs.mockResolvedValue([{ _id: "d1" }]);
 
-    await (el as unknown as { handlePreview(): Promise<void> }).handlePreview();
+    verify(el);
+    await vi.waitFor(() => expect(documentsSection(el)!.missingIds).toEqual(["d2"]));
+    expect(loaded.stubs.findDocs).toHaveBeenCalledWith(REMOTE_EP, "db", { _id: { $in: ["d1", "d2"] } }, 2);
+  });
 
-    expect(preview).not.toHaveBeenCalled();
-    expect((el as unknown as { preview: unknown }).preview).toBeNull();
+  it("keeps canVerify true and the filter section populated for a local source", async () => {
+    const loaded = await loadEditor(); // default sourceUrl "https://a/db"
+    el = loaded.el;
+
+    expect(documentsSection(el)!.canVerify).toBe(true);
+    const filter = filterSection(el);
+    expect(filter?.endpoint).toEqual(LOCAL_EP);
+    expect(filter?.sourceDb).toBe("db");
+  });
+
+  it("disables verify and the filter source while a stale URL override is active", async () => {
+    const loaded = await loadEditor();
+    el = loaded.el;
+    // A loaded/edited source URL that no longer matches (serverUrl, db): the form fields are
+    // not the effective source, so nothing may be queried through them.
+    (el as unknown as { sourceUrlValue: string }).sourceUrlValue = "https://elsewhere/other";
+    await el.updateComplete;
+
+    expect(documentsSection(el)!.canVerify).toBe(false);
+    expect(filterSection(el)?.sourceDb).toBe("");
+
+    verify(el);
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(loaded.stubs.findDocs).not.toHaveBeenCalled();
   });
 });

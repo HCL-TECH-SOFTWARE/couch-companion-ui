@@ -21,6 +21,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ReplicationService, maskUrlCredentials } from "../src/services/replication-service";
 import { SINGLE_SERVER_ID } from "../src/services/single-server";
 import { ApiClient } from "../src/services/api-client";
+import { ApiError } from "../src/services/api-error";
 
 const REPL_ROWS = {
   total_rows: 2,
@@ -374,10 +375,12 @@ describe("deleteReplication", () => {
   });
 });
 
+const LOCAL_EP = { serverUrl: "http://localhost:5984", headers: {} };
+
 describe("previewReplication", () => {
   it("counts and samples with a selector via _find", async () => {
     api.request = vi.fn().mockResolvedValue({ docs: [{ _id: "a" }, { _id: "b" }] }) as never;
-    const res = await service.previewReplication({ source_server_id: "local", source_db: "src", selector: { type: "x" } } as never);
+    const res = await service.previewReplication({ endpoint: LOCAL_EP, source_db: "src", selector: { type: "x" } } as never);
     const [, path, body] = (api.request as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(path).toBe("/src/_find");
     expect(body).toMatchObject({ selector: { type: "x" } });
@@ -387,20 +390,20 @@ describe("previewReplication", () => {
 
   it("uses _all_docs total_rows when there is no selector", async () => {
     api.request = vi.fn().mockResolvedValue({ total_rows: 4321, rows: [{ id: "a" }] }) as never;
-    const res = await service.previewReplication({ source_server_id: "local", source_db: "src" } as never);
+    const res = await service.previewReplication({ endpoint: LOCAL_EP, source_db: "src" } as never);
     expect(res.estimated_doc_count).toBe(4321);
   });
 
   it("warns that the count is a lower bound when the sample hits the cap", async () => {
     api.request = vi.fn().mockResolvedValue({ docs: Array.from({ length: 101 }, (_, i) => ({ _id: `d${i}` })) }) as never;
-    const res = await service.previewReplication({ source_server_id: "local", source_db: "src", selector: {} } as never);
+    const res = await service.previewReplication({ endpoint: LOCAL_EP, source_db: "src", selector: {} } as never);
     expect(res.warning).toBeTruthy();
     expect(res.sample_doc_ids.length).toBeLessThanOrEqual(5);
   });
 
   it("warns that a JavaScript filter cannot be evaluated in the browser", async () => {
     api.request = vi.fn().mockResolvedValue({ total_rows: 3, rows: [] }) as never;
-    const res = await service.previewReplication({ source_server_id: "local", source_db: "src", filter: "ddoc/fn" } as never);
+    const res = await service.previewReplication({ endpoint: LOCAL_EP, source_db: "src", filter: "ddoc/fn" } as never);
     expect(res.warning).toMatch(/filter/i);
   });
 });
@@ -454,5 +457,66 @@ describe("endpoint routing", () => {
     const dbs = await svc.listDatabases({ serverUrl: "http://localhost:5984", headers: {} });
     expect(reqSpy).toHaveBeenCalledWith("POST", "/_dbs_info", { keys: ["a", "b"] });
     expect(dbs.map((d) => [d.db_name, d.doc_count])).toEqual([["a", 3], ["b", 7]]);
+  });
+});
+
+describe("remote source reads", () => {
+  const REMOTE = { serverUrl: "http://remote:5984", headers: { Authorization: "Basic x" } };
+  let realApi: ApiClient;
+  let reqSpy: ReturnType<typeof vi.spyOn>;
+  let remoteSpy: ReturnType<typeof vi.spyOn>;
+  let svc: ReplicationService;
+
+  beforeEach(() => {
+    realApi = new ApiClient("http://localhost:5984");
+    reqSpy = vi.spyOn(realApi, "request").mockResolvedValue({} as never);
+    remoteSpy = vi.spyOn(realApi, "requestRemote").mockResolvedValue({} as never);
+    svc = new ReplicationService(realApi);
+  });
+
+  it("previews through the endpoint route", async () => {
+    remoteSpy.mockResolvedValue({ docs: [{ _id: "a" }] } as never);
+    const selector = { type: "x" };
+    const res = await svc.previewReplication({ endpoint: REMOTE, source_db: "crm", selector });
+    expect(remoteSpy).toHaveBeenCalledWith(
+      "http://remote:5984", "POST", "/crm/_find", { Authorization: "Basic x" },
+      { selector, fields: ["_id"], limit: 101 },
+    );
+    expect(reqSpy).not.toHaveBeenCalled();
+    expect(res.estimated_doc_count).toBe(1);
+  });
+
+  it("lists design doc ids remotely", async () => {
+    remoteSpy.mockResolvedValue({ rows: [{ id: "_design/app" }, { id: "_design/b" }] } as never);
+    expect(await svc.listDesignDocIds(REMOTE, "crm")).toEqual(["_design/app", "_design/b"]);
+    expect(remoteSpy).toHaveBeenCalledWith("http://remote:5984", "GET", "/crm/_design_docs", REMOTE.headers, undefined);
+  });
+
+  it("reads filter names from a remote design doc", async () => {
+    remoteSpy.mockResolvedValue({ filters: { f1: "x", f2: "y" } } as never);
+    expect(await svc.getFilterNames(REMOTE, "crm", "_design/app")).toEqual(["f1", "f2"]);
+    expect(remoteSpy).toHaveBeenCalledWith("http://remote:5984", "GET", "/crm/_design/app", REMOTE.headers, undefined);
+    remoteSpy.mockResolvedValue({} as never);
+    expect(await svc.getFilterNames(REMOTE, "crm", "app")).toEqual([]);
+  });
+
+  it("findDocs posts _find and returns docs", async () => {
+    remoteSpy.mockResolvedValue({ docs: [{ _id: "a" }] } as never);
+    expect(await svc.findDocs(REMOTE, "crm", { t: 1 }, 5)).toEqual([{ _id: "a" }]);
+    expect(remoteSpy).toHaveBeenCalledWith(
+      "http://remote:5984", "POST", "/crm/_find", REMOTE.headers, { selector: { t: 1 }, limit: 5 },
+    );
+  });
+
+  it("docExists is false on 404 and rethrows anything else", async () => {
+    remoteSpy.mockResolvedValueOnce({ _id: "a" } as never);
+    expect(await svc.docExists(REMOTE, "crm", "a")).toBe(true);
+    remoteSpy.mockRejectedValueOnce(new ApiError(404, "missing"));
+    expect(await svc.docExists(REMOTE, "crm", "b")).toBe(false);
+    remoteSpy.mockRejectedValueOnce(new ApiError(401, "no"));
+    await expect(svc.docExists(REMOTE, "crm", "c")).rejects.toThrow("no");
+    remoteSpy.mockResolvedValueOnce({} as never);
+    await svc.docExists(REMOTE, "crm", "_design/x y");
+    expect(remoteSpy).toHaveBeenLastCalledWith("http://remote:5984", "GET", "/crm/_design/x%20y", REMOTE.headers, undefined);
   });
 });
