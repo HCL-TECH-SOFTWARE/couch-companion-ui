@@ -1370,6 +1370,18 @@ export class CcaReplEditor extends CcaElement {
     `;
   }
 
+  private renderError() {
+    if (!this.error) return "";
+    return html`<p class="error">
+      ${this.error}
+      ${this.errorHelpUrl
+        ? html` <a href=${this.errorHelpUrl} target="_blank" rel="noopener noreferrer"
+            >How to fix this</a
+          >`
+        : ""}
+    </p>`;
+  }
+
   private renderTargetSection() {
     return html`
       <cca-repl-endpoint
@@ -1606,19 +1618,7 @@ export class CcaReplEditor extends CcaElement {
             <div class="panel">
               <form id="replication-editor-form" @submit=${this.handleSubmit}>
                 ${this.activeTab === "design" ? this.renderDesignTab() : this.renderSourceTab()}
-                ${this.error
-                  ? html`<p class="error">
-                      ${this.error}
-                      ${this.errorHelpUrl
-                        ? html` <a
-                            href=${this.errorHelpUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            >How to fix this</a
-                          >`
-                        : ""}
-                    </p>`
-                  : ""}
+                ${this.renderError()}
                 ${this.renderPreview()}
               </form>
             </div>

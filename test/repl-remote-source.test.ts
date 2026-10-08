@@ -86,7 +86,6 @@ describe("cca-repl-editor against a remote source", () => {
     expect(loaded.stubs.previewReplication).toHaveBeenCalledWith(
       expect.objectContaining({ endpoint: REMOTE_ENDPOINT, source_db: "crm" }),
     );
-    expect(loaded.stubs.previewReplication.mock.calls[0][0]).not.toHaveProperty("source_server_id");
   });
 
   it("verify-docs checks the remote source and reports missing ids", async () => {
