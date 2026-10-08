@@ -33,7 +33,8 @@ export const COUCHDB_CORS_DOCS_URL =
  * - a fetch TypeError: the browser was refused before HTTP happened. CORS not
  *   being enabled on that server and the server being unreachable produce the
  *   same opaque error, and the copy says so instead of guessing.
- * - anything else: the server answered; relay what it said.
+ * - 404: the tailored not-found copy from `describeDbAccessError`.
+ * - anything else: the server answered; relay what it said, with its HTTP status.
  */
 export function describeEndpointFailure(err: unknown): {
   title: string;
@@ -47,6 +48,13 @@ export function describeEndpointFailure(err: unknown): {
       corsRelated: false,
     };
   }
+  if (err instanceof ApiError && err.status === 404) {
+    return {
+      title: "Not found on that server",
+      detail: describeDbAccessError(err),
+      corsRelated: false,
+    };
+  }
   if (err instanceof TypeError) {
     return {
       title: "Could not reach the server",
@@ -55,12 +63,13 @@ export function describeEndpointFailure(err: unknown): {
       corsRelated: true,
     };
   }
+  const message =
+    err instanceof Error && err.message.trim()
+      ? err.message
+      : "The server returned an unexpected response.";
   return {
     title: "The request failed",
-    detail:
-      err instanceof Error && err.message.trim()
-        ? err.message
-        : "The server returned an unexpected response.",
+    detail: err instanceof ApiError ? `HTTP ${err.status}: ${message}` : message,
     corsRelated: false,
   };
 }

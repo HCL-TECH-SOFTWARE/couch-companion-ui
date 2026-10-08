@@ -123,12 +123,12 @@ describe("cca-repl-endpoint", () => {
     expect(btn().hasAttribute("disabled")).toBe(true);
   });
 
-  it("opens the database browser with the entered server and auth", async () => {
+  it("opens the database browser with the entered server and the editor-supplied request auth", async () => {
     const spy = vi
       .spyOn(getContext().replication, "listDatabases")
       .mockResolvedValue([{ db_name: "crm", doc_count: 3 }]);
     const el = await mount("source");
-    el.auth = { Authorization: "Bearer t" };
+    el.requestAuth = { Authorization: "Bearer t" };
     await el.updateComplete;
     el.shadowRoot!.querySelector<HTMLElement>("wa-button[data-browse-dbs]")!.click();
     await new Promise((r) => setTimeout(r));

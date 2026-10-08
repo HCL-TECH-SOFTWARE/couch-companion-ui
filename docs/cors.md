@@ -72,12 +72,17 @@ Notes:
 - `origins` must list the origin the app is **served from**: scheme, host and port, with no path
   and no trailing slash — `https://tools.example.com`, `http://localhost:8080`. Separate several
   origins with commas.
-- `origins = *` is handy for a quick test but is not a production setting. It also cannot be
-  combined with `credentials = true`: browsers refuse a wildcard origin on requests that carry
-  credentials, and Couch Companion sends yours. If you use `*`, expect sign-in-protected servers
-  to keep failing. List the origin explicitly instead.
-- `credentials = true` and the `authorization` header are what let the browser send your session
-  or Basic credentials to that server.
+- `origins = *` is handy for a quick test but is not a production setting. Browse, preview and
+  verification send their requests without cookies and attach your entered credentials as an
+  explicit `Authorization` header, so a wildcard origin does work for them. The restriction
+  applies elsewhere: browsers refuse `origins = *` together with `credentials = true`, so a
+  server that relies on cookie-based session sign-in (the app's SPA mode) keeps failing with a
+  wildcard. List the origin explicitly instead.
+- The `authorization` entry in `headers` is what lets the browser send the credentials you
+  entered in the endpoint's Authentication dialog to that server. `credentials = true` is not
+  needed for that: Couch Companion never sends your own session to another server. It matters
+  only for cookie-based sign-in in SPA mode. The block above sets it anyway, which errs on the
+  cautious side; you can drop that line if you only browse with entered credentials.
 
 You do not have to edit files or restart anything. CouchDB applies configuration changes made
 through its HTTP API immediately and persists them to its own config file. As an administrator

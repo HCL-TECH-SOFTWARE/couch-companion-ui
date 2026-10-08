@@ -46,8 +46,18 @@ describe("describeEndpointFailure", () => {
 
   it("relays the message of any other failure", () => {
     const f = describeEndpointFailure(new ApiError(500, "boom", {}));
-    expect(f.detail).toBe("boom");
+    expect(f.detail).toBe("HTTP 500: boom");
     expect(f.corsRelated).toBe(false);
+  });
+
+  it("routes a 404 through the tailored not-found copy", () => {
+    const f = describeEndpointFailure(new ApiError(404, "Not Found", {}));
+    expect(f.detail).toMatch(/no database/i);
+    expect(f.corsRelated).toBe(false);
+  });
+
+  it("keeps plain errors free of a status prefix", () => {
+    expect(describeEndpointFailure(new Error("odd")).detail).toBe("odd");
   });
 });
 

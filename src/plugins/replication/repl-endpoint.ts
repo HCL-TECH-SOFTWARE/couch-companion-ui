@@ -121,6 +121,12 @@ export class CcaReplEndpoint extends LitElement {
   @property({ type: String }) serverUrl = "";
   @property({ type: String }) database = "";
   @property({ attribute: false }) auth: Record<string, string> = {};
+  /**
+   * Cleaned headers for this endpoint's browser-side requests (Browse). The editor decides
+   * what is safe to send — stored headers must not follow an edited URL to another origin —
+   * so this stays distinct from `auth`, which only feeds the auth panel.
+   */
+  @property({ attribute: false }) requestAuth: Record<string, string> = {};
   @property({ type: String }) hint = "";
 
   private get kindLabel(): string {
@@ -207,7 +213,7 @@ export class CcaReplEndpoint extends LitElement {
           ${this.hint ? html`<p class="hint">${this.hint}</p>` : nothing}
         </div>
         <cca-repl-db-browser
-          .endpoint=${{ serverUrl: this.serverUrl, headers: this.auth }}
+          .endpoint=${{ serverUrl: this.serverUrl, headers: this.requestAuth }}
           @cca-db-browse-pick=${(e: CustomEvent<ReplDbBrowsePickDetail>) =>
             this.emitChange({ database: e.detail.database })}
         ></cca-repl-db-browser>

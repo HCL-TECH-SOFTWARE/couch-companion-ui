@@ -306,6 +306,14 @@ export class CcaReplEditor extends CcaElement {
    */
   private loadedManagedKeys = new Set<string>();
 
+  /**
+   * True while `sourceAuth` / `targetAuth` still hold headers loaded from the stored doc,
+   * i.e. the user has not replaced them via the auth panel. Such headers belong to the
+   * origin they were loaded for and must not follow an edited server URL elsewhere.
+   */
+  private sourceAuthFromDoc = false;
+  private targetAuthFromDoc = false;
+
   private syncingFromSource = false;
 
   private cleanAuthObject(
@@ -383,7 +391,10 @@ export class CcaReplEditor extends CcaElement {
         this.sourceDb = database;
         this.sourceUrlValue = "";
       }
-      if (auth !== undefined) this.sourceAuth = { ...auth };
+      if (auth !== undefined) {
+        this.sourceAuth = { ...auth };
+        this.sourceAuthFromDoc = false;
+      }
     } else {
       if (serverUrl !== undefined) {
         this.targetServerUrl = serverUrl;
@@ -393,15 +404,34 @@ export class CcaReplEditor extends CcaElement {
         this.targetDb = database;
         this.targetUrlValue = "";
       }
-      if (auth !== undefined) this.targetAuth = { ...auth };
+      if (auth !== undefined) {
+        this.targetAuth = { ...auth };
+        this.targetAuthFromDoc = false;
+      }
     }
+  }
+
+  /**
+   * The cleaned headers an endpoint's browser-side requests may carry. Headers loaded from the
+   * stored doc are only sent while the server URL still has the origin they were stored for;
+   * headers entered this session are always sent. The auth state itself is untouched, so an
+   * unedited save still round-trips the stored headers.
+   */
+  private requestAuth(kind: "source" | "target"): Record<string, string> {
+    const source = kind === "source";
+    const auth = this.cleanAuthObject(source ? this.sourceAuth : this.targetAuth);
+    const fromDoc = source ? this.sourceAuthFromDoc : this.targetAuthFromDoc;
+    const loadedUrl = source ? this.loadedSourceUrl : this.loadedTargetUrl;
+    const serverUrl = source ? this.sourceServerUrl : this.targetServerUrl;
+    const movedAway = fromDoc && loadedUrl !== "" && !sameOrigin(serverUrl, loadedUrl);
+    return movedAway ? {} : auth;
   }
 
   /** The source server and auth as the endpoint-routed service calls take them. */
   private sourceEndpoint(): ReplEndpointRequest {
     return {
       serverUrl: this.sourceServerUrl,
-      headers: this.cleanAuthObject(this.sourceAuth),
+      headers: this.requestAuth("source"),
     };
   }
 
@@ -523,12 +553,14 @@ export class CcaReplEditor extends CcaElement {
     const ids = [...this.docIds];
     const serverUrl = this.sourceServerUrl;
     const endpoint = this.sourceEndpoint();
+    const authKey = JSON.stringify(endpoint.headers);
     const db = this.sourceDb;
     // If the source or the doc list changed while this verify was in
     // flight, the results below no longer describe the current form
     // state — drop them instead of clobbering a newer reset/verify.
     const stillCurrent = () =>
       serverUrl === this.sourceServerUrl &&
+      authKey === JSON.stringify(this.sourceEndpoint().headers) &&
       db === this.sourceDb &&
       ids.length === this.docIds.length &&
       ids.every((id, i) => id === this.docIds[i]);
@@ -728,6 +760,8 @@ export class CcaReplEditor extends CcaElement {
         ? (targetEndpoint as { headers?: Record<string, string> }).headers
         : undefined) || {}),
     };
+    this.sourceAuthFromDoc = true;
+    this.targetAuthFromDoc = true;
     const selectorValue = doc.selector;
     if (selectorValue != null) {
       this.selectorJson = this.selectorJsonFromUnknown(selectorValue);
@@ -1105,6 +1139,7 @@ export class CcaReplEditor extends CcaElement {
   }
 
   private async handlePreview() {
+    if (!this.sourceSelectionIsEffective()) return;
     this.error = "";
     this.errorHelpUrl = "";
     try {
@@ -1364,6 +1399,7 @@ export class CcaReplEditor extends CcaElement {
         .serverUrl=${this.sourceServerUrl}
         .database=${this.sourceDb}
         .auth=${this.sourceAuth}
+        .requestAuth=${this.requestAuth("source")}
         hint="A remote source makes this server pull — the setup that works when the source is only reachable from here (for example, localhost)."
         @cca-endpoint-change=${this.handleEndpointChange}
       ></cca-repl-endpoint>
@@ -1389,6 +1425,7 @@ export class CcaReplEditor extends CcaElement {
         .serverUrl=${this.targetServerUrl}
         .database=${this.targetDb}
         .auth=${this.targetAuth}
+        .requestAuth=${this.requestAuth("target")}
         hint="A target on this server still needs a full URL and credentials — CouchDB 3 removed local endpoints, so even a same-server replication is written as one."
         @cca-endpoint-change=${this.handleEndpointChange}
       ></cca-repl-endpoint>
@@ -1399,7 +1436,7 @@ export class CcaReplEditor extends CcaElement {
     return html`
       <cca-repl-selector-section
         .selectorJson=${this.selectorJson}
-        .dbName=${this.sourceDb}
+        .dbName=${this.sourceSelectionIsEffective() ? this.sourceDb : ""}
         .endpoint=${this.sourceEndpoint()}
         .serverId=${this.sourceServerId()}
         @cca-selector-json-change=${this.handleSelectorJsonChange}
