@@ -67,3 +67,25 @@ export interface Server {
   name: string;
   url: string;
 }
+
+/** Which half of a replication an endpoint component edits. */
+export type ReplEndpointKind = "source" | "target";
+
+/** One field changed on a `cca-repl-endpoint`; only the changed field is set. */
+export interface ReplEndpointChangeDetail {
+  kind: ReplEndpointKind;
+  serverUrl?: string;
+  database?: string;
+  auth?: Record<string, string>;
+}
+
+/**
+ * A CouchDB server as an endpoint request target: the entered base URL plus the
+ * endpoint's own auth headers. `ReplicationService` routes requests for it —
+ * through the local session when it is this deployment's own server with no
+ * explicit headers, else cross-origin with exactly these headers.
+ */
+export interface ReplEndpointRequest {
+  serverUrl: string;
+  headers: Record<string, string>;
+}
