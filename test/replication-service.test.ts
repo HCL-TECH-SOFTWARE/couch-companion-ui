@@ -404,3 +404,55 @@ describe("previewReplication", () => {
     expect(res.warning).toMatch(/filter/i);
   });
 });
+
+describe("endpoint routing", () => {
+  let realApi: ApiClient;
+  let reqSpy: ReturnType<typeof vi.spyOn>;
+  let remoteSpy: ReturnType<typeof vi.spyOn>;
+  let svc: ReplicationService;
+
+  beforeEach(() => {
+    realApi = new ApiClient("http://localhost:5984");
+    reqSpy = vi.spyOn(realApi, "request").mockResolvedValue({ ok: true } as never);
+    remoteSpy = vi.spyOn(realApi, "requestRemote").mockResolvedValue({ ok: true } as never);
+    svc = new ReplicationService(realApi);
+  });
+
+  it("uses the local session for the same server without headers", async () => {
+    await svc.endpointRequest({ serverUrl: "http://localhost:5984", headers: {} }, "GET", "/_all_dbs");
+    expect(reqSpy).toHaveBeenCalledWith("GET", "/_all_dbs", undefined);
+    expect(remoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("treats a loopback alias as the same server", async () => {
+    await svc.endpointRequest({ serverUrl: "http://127.0.0.1:5984", headers: {} }, "GET", "/_all_dbs");
+    expect(reqSpy).toHaveBeenCalled();
+    expect(remoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("goes remote when the same server carries explicit headers", async () => {
+    const headers = { Authorization: "Basic abc" };
+    await svc.endpointRequest({ serverUrl: "http://localhost:5984", headers }, "GET", "/_all_dbs");
+    expect(reqSpy).not.toHaveBeenCalled();
+    expect(remoteSpy).toHaveBeenCalledWith("http://localhost:5984", "GET", "/_all_dbs", headers, undefined);
+  });
+
+  it("goes remote for a different host and strips masked userinfo", async () => {
+    await svc.endpointRequest({ serverUrl: "https://***@remote:5984", headers: {} }, "GET", "/_all_dbs");
+    expect(reqSpy).not.toHaveBeenCalled();
+    expect(remoteSpy).toHaveBeenCalledWith("https://remote:5984", "GET", "/_all_dbs", {}, undefined);
+  });
+
+  it("listDatabases feeds _all_dbs names into _dbs_info and returns doc counts", async () => {
+    reqSpy.mockImplementation((async (_m: string, path: string, body?: unknown) =>
+      path === "/_all_dbs"
+        ? ["a", "b"]
+        : (body as { keys: string[] }).keys.map((key) => ({
+            key,
+            info: { db_name: key, doc_count: key === "a" ? 3 : 7 },
+          }))) as never);
+    const dbs = await svc.listDatabases({ serverUrl: "http://localhost:5984", headers: {} });
+    expect(reqSpy).toHaveBeenCalledWith("POST", "/_dbs_info", { keys: ["a", "b"] });
+    expect(dbs.map((d) => [d.db_name, d.doc_count])).toEqual([["a", 3], ["b", 7]]);
+  });
+});

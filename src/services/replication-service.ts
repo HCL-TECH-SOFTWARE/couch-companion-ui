@@ -18,9 +18,11 @@
  */
 
 import { ApiClient } from './api-client.js';
-import { SINGLE_SERVER_ID, labelFor } from './single-server.js';
+import { SINGLE_SERVER_ID, labelFor, serverKey } from './single-server.js';
+import { fetchDatabaseInfos } from './dbs-info.js';
+import type { DatabaseInfo } from '../plugins/server-mgmt/types.js';
 import { dbPath } from './db-mgmt-service.js';
-import type { ReplicatorDoc } from '../plugins/replication/types.js';
+import type { ReplicatorDoc, ReplEndpointRequest } from '../plugins/replication/types.js';
 
 const seg = (s: string): string => encodeURIComponent(s);
 
@@ -237,6 +239,24 @@ interface SchedulerEntry {
 }
 
 /**
+ * Drops URL userinfo entirely. Stored endpoints round-trip through the editor
+ * masked as `https://***@host/...`, and `fetch()` rejects any URL that still
+ * carries credentials — so a base URL must be cleaned before it becomes a
+ * request target. Not the same as {@link maskUrlCredentials}, which preserves
+ * (masked) userinfo precisely so {@link isMaskedUrl} can detect it.
+ */
+export function stripUserinfo(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+/**
  * Replication documents living in the single server's `_replicator` database, joined with live
  * scheduler state from `_scheduler/docs`.
  *
@@ -253,6 +273,54 @@ export class ReplicationService {
    */
   localBaseUrl(): string {
     return this.api.currentBaseUrl;
+  }
+
+  /**
+   * True when `endpoint` is this deployment's own server with no explicit auth:
+   * the one case the browser's session (cookie or bearer) already covers, so the
+   * request can go through the normal client instead of a cross-origin fetch.
+   * Compared on {@link serverKey} — `127.0.0.1` for `localhost`, case, default
+   * ports — because a loopback alias IS the same server, and routing it through
+   * a cross-origin fetch would manufacture a CORS failure for "your own" server.
+   */
+  private usesLocalSession(endpoint: ReplEndpointRequest): boolean {
+    return (
+      Object.keys(endpoint.headers).length === 0 &&
+      serverKey(endpoint.serverUrl) === serverKey(this.localBaseUrl())
+    );
+  }
+
+  /** Routes one CouchDB request at whatever server `endpoint` names — see {@link usesLocalSession}. */
+  endpointRequest<T>(
+    endpoint: ReplEndpointRequest,
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    if (this.usesLocalSession(endpoint)) {
+      return this.api.request<T>(method, path, body);
+    }
+    return this.api.requestRemote<T>(
+      stripUserinfo(endpoint.serverUrl),
+      method,
+      path,
+      endpoint.headers,
+      body,
+    );
+  }
+
+  /**
+   * The databases of whatever server `endpoint` names, with document counts:
+   * `GET /_all_dbs` + chunked `POST /_dbs_info`. This is what the editor's
+   * database browser shows; failures (401/403, CORS, unreachable) surface as the
+   * rejection — the browser dialog owns explaining them.
+   */
+  async listDatabases(endpoint: ReplEndpointRequest): Promise<DatabaseInfo[]> {
+    const names = await this.endpointRequest<string[]>(endpoint, 'GET', '/_all_dbs');
+    return fetchDatabaseInfos(
+      (method, path, body) => this.endpointRequest(endpoint, method, path, body),
+      names,
+    );
   }
 
   /**

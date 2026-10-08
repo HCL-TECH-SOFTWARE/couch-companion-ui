@@ -19,6 +19,7 @@
 
 import { ApiClient } from "./api-client.js";
 import { synthesizeServer } from "./single-server.js";
+import { fetchDatabaseInfos } from "./dbs-info.js";
 import type { SessionResponse } from "../types/api.js";
 import type {
   ActiveTask,
@@ -45,8 +46,6 @@ export interface ListServersParams {
 }
 
 const SERVER_LIST_TTL_MS = 30_000;
-// CouchDB's `_dbs_info` accepts at most 100 keys per request.
-const DBS_INFO_CHUNK_SIZE = 100;
 
 export class ServerMgmtService {
   // Cache for the bare (no-params) `listServers()` call only. Many components
@@ -174,31 +173,10 @@ export class ServerMgmtService {
   ): Promise<DatabaseInfo[]> {
     const names = await this.api.request<string[]>("GET", "/_all_dbs");
 
-    const all: DatabaseInfo[] = [];
-    for (let i = 0; i < names.length; i += DBS_INFO_CHUNK_SIZE) {
-      const keys = names.slice(i, i + DBS_INFO_CHUNK_SIZE);
-      const entries = await this.api.request<
-        Array<{
-          key: string;
-          info?: {
-            db_name: string;
-            doc_count: number;
-            sizes?: { file?: number };
-            props?: { partitioned?: boolean };
-          };
-          error?: string;
-        }>
-      >("POST", "/_dbs_info", { keys });
-      for (const entry of entries) {
-        if (!entry.info) continue;
-        all.push({
-          db_name: entry.info.db_name,
-          doc_count: entry.info.doc_count,
-          size_byte: entry.info.sizes?.file,
-          partitioned: entry.info.props?.partitioned ?? false,
-        });
-      }
-    }
+    const all = await fetchDatabaseInfos(
+      (method, path, body) => this.api.request(method, path, body),
+      names,
+    );
 
     let result = all;
     if (params?.database_name) {

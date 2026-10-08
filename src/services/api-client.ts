@@ -308,6 +308,50 @@ export class ApiClient {
   }
 
   /**
+   * A request against a server that is NOT this deployment's own — the replication
+   * editor probing an entered endpoint (`_all_dbs`, `_dbs_info`, preview reads).
+   *
+   * Deliberately bypasses {@link send}: the base URL is the caller's, the ONLY
+   * headers sent are the endpoint's own (never the local session credential), and
+   * cookies are withheld (`credentials: "omit"`) — the local session must not ride
+   * to a foreign origin. A 401 here says nothing about the local session either,
+   * so the D9 session probe does not run.
+   *
+   * @throws {ApiError} on any non-2xx response, same contract as {@link request}
+   */
+  async requestRemote<T>(
+    baseUrl: string,
+    method: string,
+    path: string,
+    headers: Record<string, string>,
+    body?: unknown,
+  ): Promise<T> {
+    const payload = body ? JSON.stringify(body) : undefined;
+    const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+    const resp = await fetch(`${base}${path}`, {
+      method,
+      headers:
+        payload !== undefined
+          ? { ...headers, "Content-Type": JSON_CONTENT_TYPE }
+          : { ...headers },
+      body: payload,
+      credentials: "omit",
+    });
+    if (!resp.ok) {
+      const err = await resp
+        .json()
+        .catch(() => ({ reason: resp.statusText || "Request failed" }));
+      throw new ApiError(
+        resp.status,
+        err.reason || err.error || resp.statusText || "Request failed",
+        err,
+      );
+    }
+    const text = await resp.text();
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  /**
    * The one `fetch` every request in this file goes through: base URL, credentials, auth
    * header, {@link ApiError} on a non-2xx response, and the D9 session probe on a 401.
    *

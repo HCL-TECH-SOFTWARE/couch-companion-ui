@@ -150,7 +150,7 @@ describe("getDatabases", () => {
     expect(api.request.mock.calls.filter(([, p]) => p === "/_dbs_info").length).toBe(3);
   });
 
-  it("tolerates a _dbs_info entry with an error instead of info", async () => {
+  it("keeps a _dbs_info entry with an error as a name-only row", async () => {
     api.request = routed() as never;
     (api.request as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => Promise.resolve(["alpha", "gone"]));
     // second call is _dbs_info
@@ -158,7 +158,7 @@ describe("getDatabases", () => {
       Promise.resolve([{ key: "alpha", info: { db_name: "alpha", doc_count: 1, sizes: { file: 2 } } }, { key: "gone", error: "not_found" }]),
     );
     const dbs = await service.getDatabases(SINGLE_SERVER_ID);
-    expect(dbs.map((d) => d.db_name)).toEqual(["alpha"]);
+    expect(dbs.map((d) => d.db_name)).toEqual(["alpha", "gone"]);
   });
 });
 
