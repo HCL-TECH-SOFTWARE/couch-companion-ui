@@ -23,11 +23,6 @@ import { CcaElement } from "../../components/cca-element.js";
 import { getContext } from "../../context.js";
 import { toast } from "../../components/cca-toast.js";
 import { getLogger } from "../../services/log-service.js";
-import { ApiError } from "../../services/api-error.js";
-import {
-  describeDbAccessError,
-  isEnumerationDenied,
-} from "../../services/db-enumeration.js";
 import { SINGLE_SERVER_ID, serverKey } from "../../services/single-server.js";
 import "../../webawesome.js";
 import {
@@ -38,8 +33,7 @@ import {
 } from "../../components/cca-header.js";
 
 const log = getLogger("plugins/replication/repl-editor");
-import "./repl-source-section.js";
-import "./repl-target-section.js";
+import "./repl-endpoint.js";
 import "./repl-selector-section.js";
 import "./repl-filter-section.js";
 import "./repl-documents-section.js";
@@ -48,7 +42,12 @@ import "./repl-query-params-section.js";
 import "./repl-winning-revs-section.js";
 import "./repl-since-seq-section.js";
 import "./repl-issues-panel.js";
-import type { Server, ReplicatorDoc } from "./types.js";
+import type {
+  ReplicatorDoc,
+  ReplEndpointChangeDetail,
+  ReplEndpointRequest,
+} from "./types.js";
+import { describeEndpointFailure, CORS_HELP_URL } from "./endpoint-errors.js";
 import {
   buildReplicatorCurl,
   CREDENTIAL_PLACEHOLDER,
@@ -59,7 +58,6 @@ import {
   sameOrigin,
   type PreviewResult,
 } from "../../services/replication-service.js";
-import type { ReplAuthChangeDetail } from "./repl-auth-panel.ts";
 
 /**
  * Replicator fields the editor has no form controls for but must not drop:
@@ -238,30 +236,18 @@ export class CcaReplEditor extends CcaElement {
   @property({ type: String }) serverId = "";
   @property({ type: String }) replId = "";
 
-  @state() private servers: Server[] = [];
-  @state() private databases: string[] = [];
-  /**
-   * True when {@link databases} is empty because the list could not be fetched, rather than
-   * because the server has none. `GET /_all_dbs` is admin-only by CouchDB's own default, so
-   * this is the ordinary state for a signed-in non-admin — and the reason the Source Database
-   * control must offer free text instead of a dropdown that can never fill (#5).
-   *
-   * Set only from the error `loadDatabases` actually received. Never from `auth.isAdmin`:
-   * `[chttpd] admin_only_all_dbs = false` is a legitimate deployment where a non-admin's
-   * `_all_dbs` returns 200, and pre-gating would hide a list the server was willing to serve.
-   */
-  @state() private databasesUnavailable = false;
-  /** Why {@link databasesUnavailable} is set — shown under the free-text field. */
-  @state() private databasesReason = "";
   @state() private preview: PreviewResult | null = null;
   @state() private submitting = false;
   @state() private error = "";
+  /** Help link shown beside `error` (the CORS guide) — "" when the failure has none. */
+  @state() private errorHelpUrl = "";
   @state() private loading = false;
   @state() private activeTab: "design" | "source" = "design";
   @state() private sourceDocJson = "";
 
   // Form state
-  @state() private sourceServer = SINGLE_SERVER_ID;
+  /** Base URL the source endpoint is read from; free text, defaults to the local server. A remote value makes this server pull. */
+  @state() private sourceServerUrl = getContext().replication.localBaseUrl();
   @state() private sourceDb = "";
   /** Base URL the target endpoint is built from; free text, defaults to the local server so a same-server replication is one click (CouchDB 3 has no local endpoints). */
   @state() private targetServerUrl = getContext().replication.localBaseUrl();
@@ -269,7 +255,7 @@ export class CcaReplEditor extends CcaElement {
   /**
    * Loaded verbatim from `source.headers` and never decoded — `cca-repl-auth-panel` renders a
    * "credentials stored" state instead of revealing the value, and only overwrites this field
-   * via `cca-auth-change` (see `handleSourceAuthChange`). A save with the panel left untouched
+   * via `cca-auth-change` (see `handleEndpointChange`). A save with the panel left untouched
    * re-emits the same object, so `buildReplicatorDocFromDesign`'s `headers` comes out
    * byte-identical to what was loaded and the stored credential round-trips unchanged; an
    * explicit Clear in the panel is what produces `{}` here.
@@ -319,6 +305,14 @@ export class CcaReplEditor extends CcaElement {
    * total of edits made since.
    */
   private loadedManagedKeys = new Set<string>();
+
+  /**
+   * True while `sourceAuth` / `targetAuth` still hold headers loaded from the stored doc,
+   * i.e. the user has not replaced them via the auth panel. Such headers belong to the
+   * origin they were loaded for and must not follow an edited server URL elsewhere.
+   */
+  private sourceAuthFromDoc = false;
+  private targetAuthFromDoc = false;
 
   private syncingFromSource = false;
 
@@ -371,7 +365,7 @@ export class CcaReplEditor extends CcaElement {
   }
 
   /**
-   * Target URL field validation (`<wa-input type="url">` in repl-target-section.ts's own
+   * Target URL field validation (`<wa-input type="url">` in repl-endpoint.ts's own
    * constraint is presentational only — this is what actually gates save). `new URL()` alone
    * accepts non-special schemes like "couchdb:5984" as an opaque-path URL with no host, which
    * would silently build a broken `_replicator` endpoint — require `http`/`https` and a host.
@@ -385,80 +379,79 @@ export class CcaReplEditor extends CcaElement {
     }
   }
 
-  private handleSourceAuthChange(e: CustomEvent<ReplAuthChangeDetail>) {
-    this.sourceAuth = { ...e.detail.auth };
-  }
-
-  private handleTargetAuthChange(e: CustomEvent<ReplAuthChangeDetail>) {
-    this.targetAuth = { ...e.detail.auth };
-  }
-
-  private handleSourceDbChange(e: CustomEvent<{ sourceDb: string }>) {
-    this.missingDocIds = null;
-    this.sourceDb = this.coerceDatabaseName(e.detail.sourceDb);
-    this.sourceUrlValue = "";
-  }
-
-  private handleTargetServerUrlChange(
-    e: CustomEvent<{ targetServerUrl: string }>,
-  ) {
-    this.targetServerUrl = e.detail.targetServerUrl || "";
-    this.targetUrlValue = "";
-  }
-
-  private handleTargetDbChange(e: CustomEvent<{ targetDb: string }>) {
-    this.targetDb = this.coerceDatabaseName(e.detail.targetDb);
-    this.targetUrlValue = "";
-  }
-
-  private coerceDatabaseName(value: unknown): string {
-    if (typeof value === "string") {
-      return value;
-    }
-
-    if (value && typeof value === "object") {
-      const record = value as Record<string, unknown>;
-      const candidate =
-        record.name ??
-        record.db ??
-        record.database ??
-        record.db_name ??
-        record.database_name ??
-        record._id ??
-        record.value;
-      if (typeof candidate === "string") {
-        return candidate;
+  private handleEndpointChange(e: CustomEvent<ReplEndpointChangeDetail>) {
+    const { kind, serverUrl, database, auth } = e.detail;
+    if (kind === "source") {
+      if (serverUrl !== undefined) {
+        this.sourceServerUrl = serverUrl;
+        this.sourceUrlValue = "";
+      }
+      if (database !== undefined) {
+        this.missingDocIds = null;
+        this.sourceDb = database;
+        this.sourceUrlValue = "";
+      }
+      if (auth !== undefined) {
+        this.sourceAuth = { ...auth };
+        this.sourceAuthFromDoc = false;
+      }
+    } else {
+      if (serverUrl !== undefined) {
+        this.targetServerUrl = serverUrl;
+        this.targetUrlValue = "";
+      }
+      if (database !== undefined) {
+        this.targetDb = database;
+        this.targetUrlValue = "";
+      }
+      if (auth !== undefined) {
+        this.targetAuth = { ...auth };
+        this.targetAuthFromDoc = false;
       }
     }
-
-    return "";
   }
 
-  private normalizeDatabaseNames(payload: unknown): string[] {
-    const names: string[] = [];
+  /**
+   * The cleaned headers an endpoint's browser-side requests may carry. Headers loaded from the
+   * stored doc are only sent while the server URL still has the origin they were stored for;
+   * headers entered this session are always sent. The auth state itself is untouched, so an
+   * unedited save still round-trips the stored headers.
+   */
+  private requestAuth(kind: "source" | "target"): Record<string, string> {
+    const source = kind === "source";
+    const auth = this.cleanAuthObject(source ? this.sourceAuth : this.targetAuth);
+    const fromDoc = source ? this.sourceAuthFromDoc : this.targetAuthFromDoc;
+    const loadedUrl = source ? this.loadedSourceUrl : this.loadedTargetUrl;
+    const serverUrl = source ? this.sourceServerUrl : this.targetServerUrl;
+    const movedAway = fromDoc && loadedUrl !== "" && !sameOrigin(serverUrl, loadedUrl);
+    return movedAway ? {} : auth;
+  }
 
-    const collect = (value: unknown) => {
-      if (Array.isArray(value)) {
-        value.forEach((item) => collect(item));
-        return;
-      }
-
-      const direct = this.coerceDatabaseName(value);
-      if (direct) {
-        names.push(direct);
-        return;
-      }
-
-      if (value && typeof value === "object") {
-        const record = value as Record<string, unknown>;
-        if (record.databases) {
-          collect(record.databases);
-        }
-      }
+  /** The source server and auth as the endpoint-routed service calls take them. */
+  private sourceEndpoint(): ReplEndpointRequest {
+    return {
+      serverUrl: this.sourceServerUrl,
+      headers: this.requestAuth("source"),
     };
+  }
 
-    collect(payload);
-    return Array.from(new Set(names));
+  /** The source is complete enough to query: a server, a database, and no stale URL override. */
+  private sourceIsUsable(): boolean {
+    return Boolean(
+      this.sourceServerUrl.trim() &&
+        this.sourceDb &&
+        this.sourceSelectionIsEffective(),
+    );
+  }
+
+  /**
+   * `SINGLE_SERVER_ID` while the source server field points at this deployment's own server,
+   * else "". Only the Mango helpers inside the selector section still need it: they read and
+   * write through the local dbMgmt service by (serverId, database), so a remote source must
+   * leave them off. Everything that queries the source goes through {@link sourceEndpoint}.
+   */
+  private sourceServerId(): string {
+    return this.inferServerIdFromUrl(this.sourceServerUrl);
   }
 
   private selectorJsonFromUnknown(selector: unknown): string {
@@ -556,21 +549,18 @@ export class CcaReplEditor extends CcaElement {
   }
 
   private async handleVerifyDocs() {
-    if (
-      !this.sourceServer ||
-      !this.sourceDb ||
-      this.docIds.length === 0 ||
-      !this.sourceSelectionIsEffective()
-    )
-      return;
+    if (!this.sourceIsUsable() || this.docIds.length === 0) return;
     const ids = [...this.docIds];
-    const server = this.sourceServer;
+    const serverUrl = this.sourceServerUrl;
+    const endpoint = this.sourceEndpoint();
+    const authKey = JSON.stringify(endpoint.headers);
     const db = this.sourceDb;
     // If the source or the doc list changed while this verify was in
     // flight, the results below no longer describe the current form
     // state — drop them instead of clobbering a newer reset/verify.
     const stillCurrent = () =>
-      server === this.sourceServer &&
+      serverUrl === this.sourceServerUrl &&
+      authKey === JSON.stringify(this.sourceEndpoint().headers) &&
       db === this.sourceDb &&
       ids.length === this.docIds.length &&
       ids.every((id, i) => id === this.docIds[i]);
@@ -582,21 +572,19 @@ export class CcaReplEditor extends CcaElement {
       const designIds = ids.filter((id) => id.startsWith("_design/"));
       const regularIds = ids.filter((id) => !id.startsWith("_design/"));
       if (regularIds.length > 0) {
-        const resp = await getContext().dbMgmt.queryDocuments(server, db, {
-          selector: { _id: { $in: regularIds } },
-          scope: "raw",
-          limit: regularIds.length,
-        });
-        for (const doc of resp.documents ?? []) {
+        const docs = await getContext().replication.findDocs(
+          endpoint,
+          db,
+          { _id: { $in: regularIds } },
+          regularIds.length,
+        );
+        for (const doc of docs) {
           if (typeof doc._id === "string") found.add(doc._id);
         }
       }
       for (const id of designIds) {
-        try {
-          await getContext().dbMgmt.getDoc(server, db, id);
+        if (await getContext().replication.docExists(endpoint, db, id)) {
           found.add(id);
-        } catch (err) {
-          if (!(err instanceof ApiError && err.status === 404)) throw err;
         }
       }
       if (stillCurrent()) {
@@ -607,10 +595,7 @@ export class CcaReplEditor extends CcaElement {
       // failure must not clobber a newer reset/verify with a stray toast.
       if (stillCurrent()) {
         this.missingDocIds = null;
-        toast(
-          err instanceof Error ? err.message : "Failed to verify documents",
-          "error",
-        );
+        toast(describeEndpointFailure(err).detail, "error");
       }
     } finally {
       this.verifyingDocs = false;
@@ -633,34 +618,25 @@ export class CcaReplEditor extends CcaElement {
     return this.serverId && this.replId;
   }
 
-  /** True when (the local server, sourceDb) actually is the effective source endpoint. */
+  /** True when (sourceServerUrl, sourceDb) actually is the effective source endpoint — no stale URL override from a loaded doc or Source-JSON edit. */
   private sourceSelectionIsEffective(): boolean {
     return (
       !this.sourceUrlValue ||
       this.sourceUrlValue ===
-        this.endpointUrl(getContext().replication.localBaseUrl(), this.sourceDb)
+        this.endpointUrl(this.sourceServerUrl, this.sourceDb)
     );
   }
 
   async connectedCallback() {
     super.connectedCallback();
     this._updateHeaderActions();
-    try {
-      const { servers } = await getContext().serverMgmt.listServers();
-      this.servers = servers;
-    } catch {
-      this.servers = [];
-    }
     if (this.isEditMode()) {
       await this.loadReplication();
     } else {
-      // Source is always this deployment's one server (spec D2/D3), so its
-      // databases can load immediately — no server picker to wait on.
       const sourceDb = getContext().router.currentQuery().get("source_db");
       if (sourceDb) {
         this.sourceDb = sourceDb;
       }
-      void this.loadDatabases(this.sourceServer);
     }
   }
 
@@ -684,7 +660,7 @@ export class CcaReplEditor extends CcaElement {
     }
 
     const designKeys = [
-      "sourceServer",
+      "sourceServerUrl",
       "sourceDb",
       "targetServerUrl",
       "targetDb",
@@ -720,6 +696,7 @@ export class CcaReplEditor extends CcaElement {
   private async loadReplication() {
     this.loading = true;
     this.error = "";
+    this.errorHelpUrl = "";
     try {
       const doc = await getContext().replication.getReplication(
         this.serverId,
@@ -756,10 +733,6 @@ export class CcaReplEditor extends CcaElement {
         ? targetEndpoint
         : targetEndpoint?.url || "";
 
-    this.sourceServer =
-      doc.cca_server_id ||
-      this.serverId ||
-      this.inferServerIdFromUrl(this.baseUrlFromEndpoint(sourceEndpoint));
     this.sourceDb = this.dbNameFromEndpoint(sourceEndpoint);
     this.targetDb = this.dbNameFromEndpoint(targetEndpoint);
     this.continuous = doc.continuous ?? true;
@@ -787,6 +760,8 @@ export class CcaReplEditor extends CcaElement {
         ? (targetEndpoint as { headers?: Record<string, string> }).headers
         : undefined) || {}),
     };
+    this.sourceAuthFromDoc = true;
+    this.targetAuthFromDoc = true;
     const selectorValue = doc.selector;
     if (selectorValue != null) {
       this.selectorJson = this.selectorJsonFromUnknown(selectorValue);
@@ -811,13 +786,13 @@ export class CcaReplEditor extends CcaElement {
     // the free-text URL field shows; fall back to whatever it already held
     // (the local base URL, from the field initializer) when the doc has no
     // target endpoint at all.
+    if (sourceUrl) {
+      this.sourceServerUrl =
+        this.baseUrlFromEndpoint(sourceEndpoint) || this.sourceServerUrl;
+    }
     if (targetUrl) {
       this.targetServerUrl =
         this.baseUrlFromEndpoint(targetEndpoint) || this.targetServerUrl;
-    }
-    // Load databases for the source server
-    if (this.sourceServer) {
-      void this.loadDatabases(this.sourceServer);
     }
 
     this.syncSourceFromDesign();
@@ -827,7 +802,12 @@ export class CcaReplEditor extends CcaElement {
     endpoint: string | { url?: string } | undefined,
   ): string {
     const url = typeof endpoint === "string" ? endpoint : endpoint?.url || "";
-    return url.split("/").filter(Boolean).pop() || "";
+    const raw = url.split("/").filter(Boolean).pop() || "";
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
   }
 
   private baseUrlFromEndpoint(
@@ -877,7 +857,9 @@ export class CcaReplEditor extends CcaElement {
   private endpointUrl(base: string, dbName: string): string {
     if (!base) return "";
     const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base;
-    return dbName ? `${normalizedBase}/${dbName}` : normalizedBase;
+    return dbName
+      ? `${normalizedBase}/${encodeURIComponent(dbName)}`
+      : normalizedBase;
   }
 
   /**
@@ -902,45 +884,9 @@ export class CcaReplEditor extends CcaElement {
     return key && key === local ? SINGLE_SERVER_ID : "";
   }
 
-  /**
-   * Fills the Source Database control, and — when CouchDB will not produce the list — says so
-   * out loud instead of leaving an empty dropdown behind (#5).
-   *
-   * Two failures, told apart by {@link isEnumerationDenied} and treated differently on purpose:
-   *
-   *  * **Refused (401/403).** The everyday answer for a non-admin, and not an error: nothing is
-   *    broken and nothing the user can fix. It degrades to free text carrying its own
-   *    explanation, with no toast — one on every visit to this screen would be noise.
-   *  * **Anything else** (500, network, a malformed response). Unexpected, so it is *shown*.
-   *    A `log.warn` nobody has a console open for was the whole defect here.
-   *
-   * Both degrade to free text, because either way the user still knows the database name they
-   * want and a dropdown that cannot be filled is a dead end. Only the toast distinguishes them.
-   */
-  private async loadDatabases(serverId: string) {
-    if (!serverId) return;
-    try {
-      const dbs = await getContext().serverMgmt.getDatabases(serverId);
-      this.databases = this.normalizeDatabaseNames(dbs);
-      this.databasesUnavailable = false;
-      this.databasesReason = "";
-    } catch (err) {
-      log.warn("failed to load databases", err as Error);
-      this.databases = [];
-      this.databasesUnavailable = true;
-      this.databasesReason = describeDbAccessError(err);
-      if (!isEnumerationDenied(err)) {
-        toast(this.databasesReason, "error");
-      }
-    }
-  }
-
   /** The source endpoint URL that would actually be saved right now. */
   private effectiveSourceUrl(): string {
-    const computed = this.endpointUrl(
-      getContext().replication.localBaseUrl(),
-      this.sourceDb,
-    );
+    const computed = this.endpointUrl(this.sourceServerUrl, this.sourceDb);
     return this.sourceUrlValue || computed;
   }
 
@@ -962,9 +908,8 @@ export class CcaReplEditor extends CcaElement {
 
   /**
    * Builds the native `_replicator` document to save — this is the only
-   * request body the editor produces now (Task 3): source is always this
-   * deployment's one server, since CouchDB 3 has no local endpoints and
-   * every endpoint, same-server or not, needs a full URL.
+   * request body the editor produces now. Both endpoints come from their
+   * effective URLs, which the safety rails have validated.
    */
   private buildReplicatorDocFromDesign() {
     const sourceUrl = this.effectiveSourceUrl();
@@ -1121,6 +1066,7 @@ export class CcaReplEditor extends CcaElement {
 
     this.syncingFromSource = true;
     this.error = "";
+    this.errorHelpUrl = "";
 
     const sourceUrl =
       typeof parsed.source === "string"
@@ -1131,11 +1077,10 @@ export class CcaReplEditor extends CcaElement {
         ? parsed.target
         : (parsed.target?.url?.toString() ?? "");
 
-    const inferredSourceServer = this.inferServerIdFromUrl(sourceUrl);
     const inferredSourceDb = this.dbNameFromEndpoint(sourceUrl);
     const inferredTargetDb = this.dbNameFromEndpoint(targetUrl);
 
-    this.sourceServer = inferredSourceServer || this.sourceServer;
+    this.sourceServerUrl = this.baseUrlFromEndpoint(sourceUrl) || this.sourceServerUrl;
     this.targetServerUrl = this.baseUrlFromEndpoint(targetUrl) || this.targetServerUrl;
     this.sourceDb = inferredSourceDb || this.sourceDb;
     this.targetDb = inferredTargetDb || this.targetDb;
@@ -1188,32 +1133,23 @@ export class CcaReplEditor extends CcaElement {
       this.targetAuth,
     );
 
-    if (this.sourceServer) {
-      void this.loadDatabases(this.sourceServer);
-    }
-
     this.syncSourceFromDesign();
     this.syncingFromSource = false;
     return true;
   }
 
   private async handlePreview() {
+    if (!this.sourceSelectionIsEffective()) return;
     this.error = "";
+    this.errorHelpUrl = "";
     try {
       if (this.activeTab === "source" && !this.applySourceToDesign()) {
         return;
       }
-      // Preview queries the LOCAL server's `_find`/`_all_docs` directly against `sourceDb` — see
-      // ReplicationService.previewReplication. For a legacy/remote source (an edit-mode doc
-      // whose source endpoint isn't actually this deployment's one server) that bare db name
-      // would target the wrong database on the local server instead of the real remote one. Gate
-      // this the same way the filter/documents sections already do.
-      if (!this.sourceSelectionIsEffective()) {
-        return;
-      }
+      if (!this.sourceDb) return;
 
       const body: any = {
-        source_server_id: this.sourceServer,
+        endpoint: this.sourceEndpoint(),
         source_db: this.sourceDb,
       };
       const selector = this.selectorStringOrUndefined(this.selectorJson);
@@ -1229,16 +1165,20 @@ export class CcaReplEditor extends CcaElement {
       }
       this.preview = await getContext().replication.previewReplication(body);
     } catch (err) {
-      this.error =
-        err instanceof SyntaxError
-          ? "Invalid JSON in selector"
-          : "Preview failed";
+      if (err instanceof SyntaxError) {
+        this.error = "Invalid JSON in selector";
+        return;
+      }
+      const failure = describeEndpointFailure(err);
+      this.error = `${failure.title}: ${failure.detail}`;
+      this.errorHelpUrl = failure.corsRelated ? CORS_HELP_URL : "";
     }
   }
 
   private async handleSubmit(e: Event) {
     e.preventDefault();
     this.error = "";
+    this.errorHelpUrl = "";
     // Rails must run against the state that will actually be sent. On the
     // Source tab, the textarea's edits (including anything that changes
     // what buildReplicatorDocFromDesign would produce, e.g. the masked-
@@ -1288,9 +1228,7 @@ export class CcaReplEditor extends CcaElement {
     clearHeaderActions();
     const rails = this.computeSafetyRails();
     const canPreview =
-      this.sourceServer.length > 0 &&
-      this.sourceDb.length > 0 &&
-      this.sourceSelectionIsEffective() &&
+      this.sourceIsUsable() &&
       !rails.blocking.some((msg) => msg.includes("Selector JSON is invalid"));
     const canSave = rails.blocking.length === 0;
     addHeaderActions([
@@ -1339,6 +1277,12 @@ export class CcaReplEditor extends CcaElement {
     const blocking: string[] = [];
     const warnings: string[] = [];
 
+    const sourceServerUrl = this.sourceServerUrl.trim();
+    if (!sourceServerUrl) {
+      blocking.push("Enter a Source Server URL before saving.");
+    } else if (!this.isValidUrl(sourceServerUrl)) {
+      blocking.push("Source Server URL is invalid.");
+    }
     if (!this.sourceDb) {
       blocking.push("Select a source database before preview or save.");
     } else {
@@ -1360,9 +1304,9 @@ export class CcaReplEditor extends CcaElement {
     }
     const targetServerUrl = this.targetServerUrl.trim();
     if (!targetServerUrl) {
-      blocking.push("Enter a target URL before saving.");
+      blocking.push("Enter a Target Server URL before saving.");
     } else if (!this.isValidUrl(targetServerUrl)) {
-      blocking.push("Target URL is invalid.");
+      blocking.push("Target Server URL is invalid.");
     } else {
       // A loaded target endpoint's credentials come back masked ("***").
       // ReplicationService.updateReplication's resolveEndpoint splices the
@@ -1450,30 +1394,41 @@ export class CcaReplEditor extends CcaElement {
 
   private renderSourceSection() {
     return html`
-      <cca-repl-source-section
-        .servers=${this.servers}
-        .databases=${this.databases}
-        .databasesUnavailable=${this.databasesUnavailable}
-        .databasesReason=${this.databasesReason}
-        .sourceServer=${this.sourceServer}
-        .sourceDb=${this.sourceDb}
+      <cca-repl-endpoint
+        kind="source"
+        .serverUrl=${this.sourceServerUrl}
+        .database=${this.sourceDb}
         .auth=${this.sourceAuth}
-        @cca-source-db-change=${this.handleSourceDbChange}
-        @cca-source-auth-change=${this.handleSourceAuthChange}
-      ></cca-repl-source-section>
+        .requestAuth=${this.requestAuth("source")}
+        hint="A remote source makes this server pull — the setup that works when the source is only reachable from here (for example, localhost)."
+        @cca-endpoint-change=${this.handleEndpointChange}
+      ></cca-repl-endpoint>
     `;
+  }
+
+  private renderError() {
+    if (!this.error) return "";
+    return html`<p class="error">
+      ${this.error}
+      ${this.errorHelpUrl
+        ? html` <a href=${this.errorHelpUrl} target="_blank" rel="noopener noreferrer"
+            >How to fix this</a
+          >`
+        : ""}
+    </p>`;
   }
 
   private renderTargetSection() {
     return html`
-      <cca-repl-target-section
-        .targetServerUrl=${this.targetServerUrl}
-        .targetDb=${this.targetDb}
+      <cca-repl-endpoint
+        kind="target"
+        .serverUrl=${this.targetServerUrl}
+        .database=${this.targetDb}
         .auth=${this.targetAuth}
-        @cca-target-server-url-change=${this.handleTargetServerUrlChange}
-        @cca-target-db-change=${this.handleTargetDbChange}
-        @cca-target-auth-change=${this.handleTargetAuthChange}
-      ></cca-repl-target-section>
+        .requestAuth=${this.requestAuth("target")}
+        hint="A target on this server still needs a full URL and credentials — CouchDB 3 removed local endpoints, so even a same-server replication is written as one."
+        @cca-endpoint-change=${this.handleEndpointChange}
+      ></cca-repl-endpoint>
     `;
   }
 
@@ -1481,8 +1436,9 @@ export class CcaReplEditor extends CcaElement {
     return html`
       <cca-repl-selector-section
         .selectorJson=${this.selectorJson}
-        .dbName=${this.sourceDb}
-        .serverId=${this.sourceServer}
+        .dbName=${this.sourceSelectionIsEffective() ? this.sourceDb : ""}
+        .endpoint=${this.sourceEndpoint()}
+        .serverId=${this.sourceServerId()}
         @cca-selector-json-change=${this.handleSelectorJsonChange}
       ></cca-repl-selector-section>
     `;
@@ -1516,12 +1472,12 @@ export class CcaReplEditor extends CcaElement {
   }
 
   private renderFilterSection() {
-    const sourceIsEffective = this.sourceSelectionIsEffective();
+    // Filter lookups follow the source endpoint, but only when it is the effective source.
     return html`
       <cca-repl-filter-section
         .filterFn=${this.filterFn}
-        .sourceServer=${sourceIsEffective ? this.sourceServer : ""}
-        .sourceDb=${sourceIsEffective ? this.sourceDb : ""}
+        .endpoint=${this.sourceEndpoint()}
+        .sourceDb=${this.sourceSelectionIsEffective() ? this.sourceDb : ""}
         @cca-filter-fn-change=${this.handleFilterFnChange}
       ></cca-repl-filter-section>
     `;
@@ -1531,7 +1487,7 @@ export class CcaReplEditor extends CcaElement {
     return html`
       <cca-repl-documents-section
         .docIds=${this.docIds}
-        .canVerify=${Boolean(this.sourceServer && this.sourceDb) && this.sourceSelectionIsEffective()}
+        .canVerify=${this.sourceIsUsable()}
         .verifying=${this.verifyingDocs}
         .missingIds=${this.missingDocIds}
         @cca-doc-ids-change=${this.handleDocIdsChange}
@@ -1699,7 +1655,7 @@ export class CcaReplEditor extends CcaElement {
             <div class="panel">
               <form id="replication-editor-form" @submit=${this.handleSubmit}>
                 ${this.activeTab === "design" ? this.renderDesignTab() : this.renderSourceTab()}
-                ${this.error ? html`<p class="error">${this.error}</p>` : ""}
+                ${this.renderError()}
                 ${this.renderPreview()}
               </form>
             </div>

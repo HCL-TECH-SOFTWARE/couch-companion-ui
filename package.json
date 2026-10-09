@@ -19,26 +19,26 @@
     "test:spa": "node scripts/spa-check.mjs"
   },
   "dependencies": {
-    "@awesome.me/webawesome": "^3.13.0",
+    "@awesome.me/webawesome": "^3.14.0",
     "@fontsource-variable/crimson-pro": "^5.3.0",
     "@fontsource-variable/quicksand": "^5.3.0",
     "@fortawesome/fontawesome-free": "7.3.0",
     "d3": "^7.9.0",
     "lit": "^3.3.3",
-    "monaco-editor": "^0.56.0"
+    "monaco-editor": "^0.57.0"
   },
   "devDependencies": {
     "@open-wc/testing": "^5.0.0",
     "@types/d3": "^7.4.3",
-    "@types/node": "^26.6.2",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@types/node": "^26.6.4",
+    "@vitest/coverage-v8": "^5.0.3",
     "@web/test-runner-commands": "^1.0.1",
     "happy-dom": "^20.14.5",
-    "oxlint": "^1.85.0",
+    "oxlint": "^1.87.0",
     "prettier": "^3.9.9",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
   },
   "allowScripts": {
     "fsevents@2.3.3": true,

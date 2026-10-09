@@ -38,8 +38,6 @@ for (const tag of [
   "wa-tab-group",
   "wa-tab-panel",
   "wa-icon",
-  "cca-repl-source-section",
-  "cca-repl-target-section",
   "cca-repl-selector-section",
   "cca-repl-filter-section",
   "cca-repl-behavior-section",
@@ -207,9 +205,9 @@ describe("cca-repl-editor phase-2 constraints", () => {
     await Promise.resolve();
     await el.updateComplete;
 
-    el.shadowRoot!.querySelector("cca-repl-source-section")!.dispatchEvent(
-      new CustomEvent("cca-source-db-change", {
-        detail: { sourceDb: "src" },
+    el.shadowRoot!.querySelector('cca-repl-endpoint[kind="source"]')!.dispatchEvent(
+      new CustomEvent("cca-endpoint-change", {
+        detail: { kind: "source", database: "src" },
         bubbles: true,
         composed: true,
       }),

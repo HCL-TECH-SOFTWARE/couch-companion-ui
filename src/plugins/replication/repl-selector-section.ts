@@ -20,6 +20,9 @@
 import { html, css, LitElement } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { getContext } from "../../context";
+import { toast } from "../../components/cca-toast.js";
+import type { ReplEndpointRequest } from "./types.js";
+import { describeEndpointFailure } from "./endpoint-errors.js";
 import { SavedQuerySnapshot } from "../db-mgmt/types";
 import { CcaQueryHistory } from "../db-mgmt/query_history.js";
 import "../db-mgmt/query_history.js";
@@ -185,6 +188,14 @@ export class CcaReplSelectorSection extends LitElement {
   `;
 
   @property({ type: String }) selectorJson = "";
+  /** The source server (URL + auth headers); preview queries run against it. */
+  @property({ attribute: false }) endpoint: ReplEndpointRequest = { serverUrl: "", headers: {} };
+  /**
+   * Set (to this deployment's server id) only while the source IS this deployment's server.
+   * The embedded Mango helpers (field suggestions, explain, per-database query history) read
+   * and write through the local dbMgmt service by this id and database name, so for a remote
+   * source it stays "" and they stay off rather than touching a same-named local database.
+   */
   @property({ type: String }) serverId = "";
   @property({ type: String }) dbName = "";
 
@@ -258,7 +269,7 @@ export class CcaReplSelectorSection extends LitElement {
               <wa-button
                 size="s"
                 variant="brand"
-                ?disabled=${!this.serverId || this._loading}
+                ?disabled=${!this.dbName || this._loading}
                 @click=${() => this._runPreview()}
               >
                 ${this._loading ? html`<wa-spinner></wa-spinner>` : "Run Preview (Max 10 Docs)"}
@@ -267,7 +278,7 @@ export class CcaReplSelectorSection extends LitElement {
               <wa-button
                 size="s"
                 variant="brand"
-                ?disabled=${!this.serverId || this._loading}
+                ?disabled=${!this.dbName || this._loading}
                 @click=${() => this.applySelector()}
               >
                 ${this._loading ? html`<wa-spinner></wa-spinner>` : "Apply Selector"}
@@ -336,21 +347,17 @@ export class CcaReplSelectorSection extends LitElement {
         return;
       }
       getContext()
-        .dbMgmt.queryDocuments(this.serverId, this.dbName, {
-          selector: { selector: sel },
-          fields: undefined,
-          sort: undefined,
-          limit: 10,
-          bookmark: undefined,
-          scope: "full",
-        })
-        .then((resp) => {
-          const docs = (resp.documents ?? []) as Record<string, unknown>[];
+        .replication.findDocs(this.endpoint, this.dbName, sel, 10)
+        .then((docs) => {
           this._previewResults = docs;
+          // History lives in the source database via the local dbMgmt service — local source only.
+          if (!this.serverId) return;
           const snapshot = this._buildSnapshot(this._selectorPlaceholder);
           this.saveHistory(this.dbName, snapshot);
         })
-        .catch((err) => {});
+        .catch((err) => {
+          toast(describeEndpointFailure(err).detail, "error");
+        });
     } catch {
       return;
     }

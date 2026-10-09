@@ -36,6 +36,8 @@ for (const tag of ["wa-dialog", "wa-select", "wa-option", "wa-button", "wa-spinn
   }
 }
 
+const EP = { serverUrl: "http://s1:5984", headers: { Authorization: "Basic x" } };
+
 function root(el: CcaReplFilterPicker): ShadowRoot {
   if (!el.shadowRoot) throw new Error("expected shadowRoot");
   return el.shadowRoot;
@@ -51,7 +53,7 @@ function selectValue(el: CcaReplFilterPicker, selector: string, value: string) {
 
 async function mountOpen(): Promise<CcaReplFilterPicker> {
   const el = document.createElement("cca-repl-filter-picker") as CcaReplFilterPicker;
-  el.serverId = "s1";
+  el.endpoint = EP;
   el.dbName = "db1";
   document.body.appendChild(el);
   await el.updateComplete;
@@ -72,20 +74,20 @@ describe("cca-repl-filter-picker", () => {
 
   it("loads design docs on open and filters on ddoc selection, then emits the pick", async () => {
     const list = vi
-      .spyOn(getContext().designMgmt, "listDesignDocs")
-      .mockResolvedValue([{ ddoc_id: "_design/flows" } as never]);
+      .spyOn(getContext().replication, "listDesignDocIds")
+      .mockResolvedValue(["_design/flows"]);
     const get = vi
-      .spyOn(getContext().designMgmt, "getDesignDoc")
-      .mockResolvedValue({ filters: { byUser: "function(){}", byType: "function(){}" } });
+      .spyOn(getContext().replication, "getFilterNames")
+      .mockResolvedValue(["byUser", "byType"]);
 
     el = await mountOpen();
-    expect(list).toHaveBeenCalledWith("s1", "db1");
+    expect(list).toHaveBeenCalledWith(EP, "db1");
 
     selectValue(el, "[data-ddoc-select]", "_design/flows");
     await vi.waitFor(() =>
       expect(root(el).querySelectorAll("wa-option[data-filter]").length).toBe(2)
     );
-    expect(get).toHaveBeenCalledWith("s1", "db1", "_design/flows");
+    expect(get).toHaveBeenCalledWith(EP, "db1", "_design/flows");
 
     let detail: { designDoc: string; filterName: string } | undefined;
     el.addEventListener("cca-filter-picked", (e) => {
@@ -99,10 +101,8 @@ describe("cca-repl-filter-picker", () => {
   });
 
   it("shows an empty state for a ddoc without filters and keeps confirm disabled", async () => {
-    vi.spyOn(getContext().designMgmt, "listDesignDocs").mockResolvedValue([
-      { ddoc_id: "_design/plain" } as never
-    ]);
-    vi.spyOn(getContext().designMgmt, "getDesignDoc").mockResolvedValue({ views: {} });
+    vi.spyOn(getContext().replication, "listDesignDocIds").mockResolvedValue(["_design/plain"]);
+    vi.spyOn(getContext().replication, "getFilterNames").mockResolvedValue([]);
 
     el = await mountOpen();
     selectValue(el, "[data-ddoc-select]", "_design/plain");
@@ -111,9 +111,9 @@ describe("cca-repl-filter-picker", () => {
   });
 
   it("shows an empty state when the database has no design docs", async () => {
-    vi.spyOn(getContext().designMgmt, "listDesignDocs").mockResolvedValue([]);
+    vi.spyOn(getContext().replication, "listDesignDocIds").mockResolvedValue([]);
     const picker = document.createElement("cca-repl-filter-picker") as CcaReplFilterPicker;
-    picker.serverId = "s1";
+    picker.endpoint = EP;
     picker.dbName = "db1";
     document.body.appendChild(picker);
     picker.open = true;
@@ -123,9 +123,7 @@ describe("cca-repl-filter-picker", () => {
   });
 
   it("emits cancel and closes", async () => {
-    vi.spyOn(getContext().designMgmt, "listDesignDocs").mockResolvedValue([
-      { ddoc_id: "_design/flows" } as never
-    ]);
+    vi.spyOn(getContext().replication, "listDesignDocIds").mockResolvedValue(["_design/flows"]);
     el = await mountOpen();
     let cancelled = 0;
     el.addEventListener("cca-filter-pick-cancel", () => { cancelled += 1; });
@@ -136,10 +134,10 @@ describe("cca-repl-filter-picker", () => {
 
   it("toasts and shows the no-ddocs empty state when listDesignDocs rejects", async () => {
     const toastSpy = vi.spyOn(await import("../src/components/cca-toast.js"), "toast");
-    vi.spyOn(getContext().designMgmt, "listDesignDocs").mockRejectedValue(new Error("boom"));
+    vi.spyOn(getContext().replication, "listDesignDocIds").mockRejectedValue(new Error("boom"));
 
     const picker = document.createElement("cca-repl-filter-picker") as CcaReplFilterPicker;
-    picker.serverId = "s1";
+    picker.endpoint = EP;
     picker.dbName = "db1";
     document.body.appendChild(picker);
     picker.open = true;
@@ -154,10 +152,8 @@ describe("cca-repl-filter-picker", () => {
 
   it("toasts and leaves the filter hint when getDesignDoc rejects", async () => {
     const toastSpy = vi.spyOn(await import("../src/components/cca-toast.js"), "toast");
-    vi.spyOn(getContext().designMgmt, "listDesignDocs").mockResolvedValue([
-      { ddoc_id: "_design/flows" } as never
-    ]);
-    vi.spyOn(getContext().designMgmt, "getDesignDoc").mockRejectedValue(new Error("kaboom"));
+    vi.spyOn(getContext().replication, "listDesignDocIds").mockResolvedValue(["_design/flows"]);
+    vi.spyOn(getContext().replication, "getFilterNames").mockRejectedValue(new Error("kaboom"));
 
     el = await mountOpen();
     selectValue(el, "[data-ddoc-select]", "_design/flows");

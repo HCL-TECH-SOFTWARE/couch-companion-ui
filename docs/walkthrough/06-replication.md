@@ -41,13 +41,20 @@ replication from `orders` into `orders-archive`, `running`.
 
 ## Creating one
 
-![The replication editor, with the source server fixed to this deployment](img/replication-create.png)
+![The replication editor, with symmetric Source and Target sections](img/replication-create.png)
 
-The editor is sectioned. **Source** comes first, and the source server is fixed with an
-explanation — *this deployment manages one CouchDB server, so replication always reads from it*.
-Couch Companion administers a single CouchDB; it will push to anywhere, but it always pulls from
-the server you are signed in to. The target may be another database on this server or a URL
-elsewhere, with its own credentials.
+The editor is sectioned, and **Source** and **Target** are built the same way: a server URL, then
+**Authentication**, then the **Database**, with a **Browse…** button to pick one from the list the
+server offers. Either endpoint can be this server, which is the default, or any other CouchDB
+you can reach by URL, with its own credentials.
+
+The replication always runs on the server you are signed in to, because that is where the
+`_replicator` document lives. If the source is a remote server, this server *pulls* from it. That
+is the way to replicate from a CouchDB that cannot reach you — a laptop behind a firewall, or a
+`localhost` source — without opening anything inbound: enter the remote server as the source and
+let this one fetch. Browse (and the preview) query the server you typed directly from your browser,
+which needs that server to allow CORS; if Browse reports that it could not reach the server, see
+[CORS setup](../cors.md). The replication itself never needs CORS.
 
 The remaining sections are where the decisions are:
 

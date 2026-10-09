@@ -37,14 +37,14 @@ for (const tag of ["wa-input", "cca-repl-filter-picker", "wa-button"]) {
 
 async function mount(
   filterFn = "",
-  sourceServer = "",
+  serverUrl = "",
   sourceDb = "",
 ): Promise<CcaReplFilterSection> {
   const el = document.createElement(
     "cca-repl-filter-section",
   ) as CcaReplFilterSection;
   el.filterFn = filterFn;
-  el.sourceServer = sourceServer;
+  el.endpoint = { serverUrl, headers: {} };
   el.sourceDb = sourceDb;
   document.body.appendChild(el);
   await el.updateComplete;
@@ -101,7 +101,7 @@ describe("cca-repl-filter-section", () => {
     await el.updateComplete;
     expect(el.shadowRoot?.querySelector("[data-browse]")?.hasAttribute("disabled")).toBe(true);
 
-    el.sourceServer = "s1";
+    el.endpoint = { serverUrl: "http://s1:5984", headers: {} };
     el.sourceDb = "db1";
     await el.updateComplete;
     expect(el.shadowRoot?.querySelector("[data-browse]")?.hasAttribute("disabled")).toBe(false);
@@ -109,7 +109,7 @@ describe("cca-repl-filter-section", () => {
 
   it("opens the picker on Browse and applies a pick as the filter value", async () => {
     el = await mount("");
-    el.sourceServer = "s1";
+    el.endpoint = { serverUrl: "http://s1:5984", headers: {} };
     el.sourceDb = "db1";
     await el.updateComplete;
 
@@ -137,7 +137,7 @@ describe("cca-repl-filter-section", () => {
 
   it("closes picker and emits no event on cancel", async () => {
     el = await mount("mydesign/existing");
-    el.sourceServer = "s1";
+    el.endpoint = { serverUrl: "http://s1:5984", headers: {} };
     el.sourceDb = "db1";
     await el.updateComplete;
 
