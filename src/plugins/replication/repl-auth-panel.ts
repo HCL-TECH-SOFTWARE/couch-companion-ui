@@ -29,6 +29,7 @@ import type {
   HttpHeaderRow,
   HttpHeadersChangeDetail,
 } from "../../components/cca-http-headers-table.js";
+import { basicAuthValue } from "../../services/api-client.js";
 
 export type AuthMode = "none" | "basic" | "bearer" | "custom";
 
@@ -244,7 +245,7 @@ export class CcaReplAuthPanel extends LitElement {
       const user = this.draftUser.trim();
       const password = this.draftPassword.trim();
       const value =
-        user || password ? `Basic ${btoa(`${user}:${password}`)}` : "Basic ";
+        user || password ? basicAuthValue(user, password) : "Basic ";
       return { Authorization: value };
     }
     return this.draftHeaders
