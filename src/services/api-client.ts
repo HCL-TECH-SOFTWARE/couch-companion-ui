@@ -56,8 +56,9 @@ export const DEFAULT_BINARY_CONTENT_TYPE = "application/octet-stream";
 /**
  * RFC 7617: the user-pass is encoded as UTF-8 before base64. Bare `btoa` throws above U+00FF,
  * so a non-ASCII password would otherwise fail at the call site rather than being sent.
+ * Exported for every place that compiles a Basic `Authorization` value (#52).
  */
-function basicAuthValue(username: string, password: string): string {
+export function basicAuthValue(username: string, password: string): string {
   const bytes = new TextEncoder().encode(`${username}:${password}`);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);

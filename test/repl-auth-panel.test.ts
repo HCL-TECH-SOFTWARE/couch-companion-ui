@@ -168,6 +168,41 @@ describe("cca-repl-auth-panel", () => {
     });
   });
 
+  // #52: bare `btoa` throws InvalidCharacterError above U+00FF, so a non-ASCII user or password
+  // used to crash Apply instead of compiling a header. RFC 7617 (and CouchDB) expect the
+  // user-pass UTF-8-encoded before base64 — the same encoding ApiClient.basicAuthValue produces.
+  it("compiles a non-ASCII user/password as UTF-8 Basic auth instead of throwing (#52)", async () => {
+    el = await mountWithStoredAuth("Basic " + btoa("admin:hunter2"));
+
+    (root(el).querySelector("[data-replace]") as HTMLElement).click();
+    await el.updateComplete;
+
+    const user = root(el).querySelector(
+      "[data-user]",
+    ) as HTMLInputElement & { value: string };
+    const pass = root(el).querySelector(
+      "[data-password]",
+    ) as HTMLInputElement & { value: string };
+    user.value = "jörg";
+    user.dispatchEvent(new Event("input"));
+    pass.value = "p—ssword"; // em dash: U+2014, where bare btoa throws
+    pass.dispatchEvent(new Event("input"));
+    await el.updateComplete;
+
+    expect(() => btoa("jörg:p—ssword")).toThrow();
+
+    let detail: ReplAuthChangeDetail | undefined;
+    el.addEventListener("cca-auth-change", (e) => {
+      detail = (e as CustomEvent<ReplAuthChangeDetail>).detail;
+    });
+    (root(el).querySelector("[data-confirm]") as HTMLElement).click();
+
+    // UTF-8 bytes of "jörg:p—ssword", base64-encoded — what CouchDB decodes per RFC 7617.
+    expect(detail?.auth).toEqual({
+      Authorization: "Basic asO2cmc6cOKAlHNzd29yZA==",
+    });
+  });
+
   // Finding #5 of the Phase 4 final-review wave: without this guard, clicking Replace then Apply
   // with blank fields would compile a bare "Basic "/"Bearer " scheme, which repl-editor.ts's
   // cleanAuthObject trims into a truthy "Basic"/"Bearer" — overwriting the real stored credential
