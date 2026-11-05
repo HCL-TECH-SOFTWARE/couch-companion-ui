@@ -255,9 +255,18 @@ export function connect(url) {
   };
 }
 
+/**
+ * How long Chrome gets to open its DevTools port. Generous on purpose: a healthy launch returns the
+ * moment the file appears, so this only bounds how long a broken one takes to report. It used to be
+ * 10 s, and PR #73's CI hit that three runs in a row — Chrome still alive, port never opened, and
+ * nothing in the log to say whether it was slow or hung.
+ */
+const DEVTOOLS_PORT_TIMEOUT_MS = 30_000;
+
 async function waitForDevToolsPort(userDataDir, chromeExited) {
   const portFile = path.join(userDataDir, 'DevToolsActivePort');
-  for (let i = 0; i < 200; i++) {
+  const deadline = Date.now() + DEVTOOLS_PORT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     if (chromeExited.value) fail(`Chrome exited before it opened a DevTools port:\n${chromeExited.output}`);
     if (fs.existsSync(portFile)) {
       const [port, wsPath] = fs.readFileSync(portFile, 'utf8').trim().split('\n');
@@ -265,7 +274,12 @@ async function waitForDevToolsPort(userDataDir, chromeExited) {
     }
     await sleep(50);
   }
-  fail('Chrome never wrote a DevToolsActivePort file');
+  // Chrome is still running but never became ready. What it printed is the only evidence of why,
+  // and the exited branch above was the only place that ever showed it.
+  fail(
+    `Chrome never wrote a DevToolsActivePort file within ${DEVTOOLS_PORT_TIMEOUT_MS / 1000} s. ` +
+      `Its output:\n${chromeExited.output.trim() || '(none)'}`
+  );
 }
 
 /**
