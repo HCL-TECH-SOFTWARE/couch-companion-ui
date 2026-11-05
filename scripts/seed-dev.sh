@@ -113,6 +113,11 @@ cfg "cors/credentials" '"true"'
 cfg "cors/methods" '"GET, PUT, POST, HEAD, DELETE, OPTIONS"'
 cfg "cors/headers" '"accept, authorization, content-type, origin, referer"'
 
+# The image's /_utils/ CSP default (docker/Dockerfile), so a build dropped into
+# this CouchDB's /_utils/ is served the same policy. Keep the two in step. A
+# _config PUT to csp takes effect on the next request; no restart needed.
+cfg "csp/utils_header_value" "\"default-src 'self'; connect-src *; img-src 'self' data:; font-src *; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src https://blog.couchdb.org;\""
+
 # Non-admin CouchDB-native user for role-gating tests (spec D9)
 DEMO_REV=$(curl -s -u "$ADMIN" "$COUCH/_users/org.couchdb.user:demo" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')
 curl -sf -u "$ADMIN" -X PUT "$COUCH/_users/org.couchdb.user:demo${DEMO_REV:+?rev=$DEMO_REV}" \
