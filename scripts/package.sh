@@ -263,6 +263,15 @@ if [ "$DOCKER" = 1 ]; then
   # deep. One asset from the tree that fails most quietly if it is missing.
   curl -fsS -o /dev/null "$BASE/_utils/icons/system/regular/eye.svg" ||
     fail "the icon tree is not served under /_utils/ — every Web Awesome component icon would be blank"
+  # The image's CSP default (docker/Dockerfile) fails as quietly: a malformed
+  # ini line or directive is dropped, CouchDB falls back to its built-in policy
+  # with no connect-src, and the app starts fine until the first IdP call.
+  headers=$(curl -fsS -o /dev/null -D - "$BASE/_utils/") ||
+    fail "/_utils/ in the image did not answer a header request"
+  case "$headers" in
+    *'connect-src *;'*) : ;;
+    *) fail "/_utils/ in the image is not served with the image's CSP (no 'connect-src *') — check docker/Dockerfile" ;;
+  esac
 
   IMAGE_MB=$(docker image inspect "${IMAGE_NAME}:${VERSION}" --format '{{.Size}}' |
     awk '{ printf "%.0f", $1 / 1048576 }')

@@ -103,13 +103,22 @@ the official CouchDB in every other respect — same entrypoint, same `5984`, sa
 you know about running the `couchdb` image applies unchanged, and databases in the named volume
 outlive the container, so a later version is a `docker rm` and a `docker run` away.
 
-Two things carry over from the drop-in, because the image *is* a drop-in:
+Fauxton is gone, including the bundled docs at `/_utils/docs/`. There is no backup kept inside
+the image — the base image is the backup. To see stock Fauxton again, run `couchdb:latest`.
 
-- Fauxton is gone, including the bundled docs at `/_utils/docs/`. There is no backup kept inside
-  the image — the base image is the backup. To see stock Fauxton again, run `couchdb:latest`.
-- Git sync still needs a CSP change, for exactly the reason described in
-  [the drop-in's CSP section](#git-sync-needs-one-more-change-couchdbs-content-security-policy).
-  The image ships CouchDB's default policy untouched.
+The one config change the image makes is the `/_utils/` Content-Security-Policy. CouchDB's
+built-in policy has no `connect-src`, which blocks every cross-origin request the app makes — IdP
+discovery and sign-in, git sync (see
+[the drop-in's CSP section](#git-sync-needs-one-more-change-couchdbs-content-security-policy)).
+The image sets this default in `/opt/couchdb/etc/default.d/90-couch-companion.ini`:
+
+    [csp]
+    utils_header_value = default-src 'self'; connect-src *; img-src 'self' data:; font-src *; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src https://blog.couchdb.org;
+
+`connect-src *` lets the admin UI call any host. That is what lets IdP and git hosts work without
+setup, and it is broader than either of them needs. To narrow it, set `[csp] utils_header_value`
+in `local.ini` or `local.d/`, or PUT it to `/_node/_local/_config/csp/utils_header_value`. Either
+one overrides the image's default.
 
 ### Publishing
 
