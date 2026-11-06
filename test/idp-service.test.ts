@@ -672,6 +672,58 @@ describe('isLogEnabled', () => {
   });
 });
 
+describe('[oidc] log is read from the node config', () => {
+  /** Every operation that ends in an activity-log write, in an order that keeps each one valid. */
+  async function runEveryOperation(svc: IdpService) {
+    const created = await svc.createIdp(createRequest);
+    await svc.updateIdp(created._id, { client_id: 'x', roles_claim: 'roles', idp_only: false });
+    await svc.refreshIdp(created._id);
+    await svc.applyIdp(created._id);
+    await svc.restartNode(created._id);
+    await svc.deleteIdp(created._id);
+  }
+
+  it('never asks for the key on its own, which 404s while it is unset', async () => {
+    globalThis.fetch = idpNetwork();
+    const { api } = fakeApi();
+    const svc = service(api, fakeStore().store);
+
+    await runEveryOperation(svc);
+    await svc.isLogEnabled();
+
+    const keyedReads = api.request.mock.calls.filter(
+      (c: unknown[]) => c[0] === 'GET' && String(c[1]).endsWith('/_config/oidc/log'),
+    );
+    expect(keyedReads).toEqual([]);
+  });
+
+  it('still records every operation once it is on', async () => {
+    globalThis.fetch = idpNetwork();
+    const { api, sections } = fakeApi();
+    sections.oidc = { log: 'true' };
+    const { store, docs } = fakeStore();
+    const svc = service(api, store);
+
+    await runEveryOperation(svc);
+
+    const events = [...docs.values()].map((doc) => doc.event).sort();
+    expect(events).toEqual(['applied', 'created', 'deleted', 'refreshed', 'restarted', 'updated']);
+  });
+
+  it('reuses the config an operation already read instead of fetching it again', async () => {
+    globalThis.fetch = idpNetwork();
+    const { api } = fakeApi();
+    const svc = service(api, fakeStore().store);
+
+    await svc.createIdp(createRequest);
+
+    const configReads = api.request.mock.calls.filter(
+      (c: unknown[]) => c[0] === 'GET' && String(c[1]).startsWith('/_node/_local/_config'),
+    );
+    expect(configReads).toHaveLength(1);
+  });
+});
+
 describe('no /api/idp anywhere', () => {
   it('never calls a parent-backend path', async () => {
     globalThis.fetch = idpNetwork();

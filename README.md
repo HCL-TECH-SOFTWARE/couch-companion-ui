@@ -7,6 +7,22 @@ anywhere (GitHub Pages, Cloudflare Pages). Derived from the Couch Companion
 [Monaco](https://microsoft.github.io/monaco-editor/), [d3](https://d3js.org/) — talking
 **directly** to CouchDB's REST API. No server of its own, no credential vault, no background tasks.
 
+## Try it out
+
+The fastest way to try it out and gain an idea how it looks and works is to run a disposable container that doesn't leave anything behind (a container runtime like [Docker](https://www.docker.com/), [Podman](https://podman.io/), [Rancher](https://www.rancher.com/) or [OrbStack](https://orbstack.dev/) is required)
+
+```bash
+docker run --rm \
+  --name couch-companion-test \
+  -p 5984:5984 \
+  -e COUCHDB_USER=admin \
+  -e COUCHDB_PASSWORD=password \
+  ghcr.io/hcl-tech-software/couch-companion:0.4.1
+```
+
+> [!CAUTION]
+> Above command disposes anything you edited on container shutdown. This is great for poking around, but not to keep your pokes, keep that in mind!
+
 ## Status
 
 What runs today covers databases and documents, Mango queries and indexes, permissions, users,
@@ -15,7 +31,7 @@ GitHub sync, and OIDC login together with the IdP admin screen that configures i
 either from CouchDB's own `/_utils` or as a static SPA, talking to nothing but CouchDB
 (and, if you switch sync on, GitHub).
 
-The design was verified against a live CouchDB 3.5.2 and Keycloak rather than against a mock.
+The design was verified against a live CouchDB 3.5.3 and Keycloak rather than against a mock.
 
 Rough edges to know about before you judge the repo:
 
@@ -93,10 +109,12 @@ CouchDB (:5984, admin/password) and Keycloak (:8080, realm `couch`,
 users `hariseldon`/`password` = `_admin`, `gaaldornick`/`password` = user)
 and seeds both via `scripts/seed-dev.sh` (idempotent — rerun any time).
 
+```bash
     npm run dev         # vite on :5173
     npm run check       # lint + tests + typecheck (what ci.yml runs)
     ./scripts/check.sh  # the merge gate: npm ci + npm run check + build
     npx vite build      # production bundle in dist/
+```
 
 At :5173 the app is in **SPA mode** — it detects CouchDB by probing its own origin, finds none, and
 asks you for a server URL. Log in there with `admin`/`password` (server admin) or `demo`/`password`
@@ -107,7 +125,9 @@ the app's own origin — which is the dev server, not CouchDB. To exercise it �
 generally — build and copy `dist/` into the CouchDB container, then open
 <http://localhost:5984/_utils/>:
 
+```bash
     npx vite build && docker compose -f .devcontainer/docker-compose.yml cp dist/. couchdb:/opt/couchdb/share/www/
+```
 
 Recreate the container to get Fauxton back. For a real server use the tarball from
 `scripts/package.sh` and follow [docs/install.md](docs/install.md) instead of copying by hand.

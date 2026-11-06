@@ -116,7 +116,7 @@ const initContext = (): AppContext => {
   const plugins = new PluginLoader(router);
   const serverMgmt = new ServerMgmtService(api);
   const reachabilityStatus = new ReachabilityStatusService(api);
-  const couchCompanionStore = new CouchCompanionStore(api);
+  const couchCompanionStore = new CouchCompanionStore(api, () => auth.isAdmin);
   const config = new ConfigService(api);
   const membership = new MembershipService(api);
   const csp = new CspService(api, config);
@@ -127,7 +127,7 @@ const initContext = (): AppContext => {
   const dbMgmt = new DbMgmtService(api);
   const attachments = new AttachmentService(api);
   const users = new UsersService(dbMgmt);
-  const bannerAdmin = new BannerAdminService(dbMgmt);
+  const bannerAdmin = new BannerAdminService(dbMgmt, couchCompanionStore);
   const serverDashboard = new ServerDashboardService(serverMgmt, idp, replication, getRouter());
   serverDashboard.start();
 

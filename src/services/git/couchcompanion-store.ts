@@ -120,9 +120,53 @@ function isMissingDatabaseOnWrite(err: unknown): boolean {
  * already exported and already handle the `_design/` id-encoding edge case correctly.
  *
  * @param api - shared ApiClient (token already set by AuthService)
+ * @param canListDatabases - whether this session may ask `GET /_all_dbs`, which CouchDB reserves
+ *   for server admins by default; see {@link knownMissing}
  */
 export class CouchCompanionStore {
-  constructor(private api: ApiClient) {}
+  /** Set once the database is known to exist. Cleared only by a scan that 404s. */
+  private exists = false;
+  /** The `_all_dbs` lookup in flight, shared by every read that asks while it runs. */
+  private lookup: Promise<boolean> | null = null;
+
+  constructor(
+    private api: ApiClient,
+    private canListDatabases: () => boolean = () => false,
+  ) {}
+
+  /**
+   * True only when `couchcompanion` is known not to exist, so reads can answer "nothing"
+   * without a request that would 404 (#74). Most servers never run a git sync, so most never
+   * have this database, and the browser reports every one of those 404s as a failed request.
+   *
+   * Found out with `GET /_all_dbs` bounded to this one name, which answers 200 either way.
+   * Server admins only: CouchDB answers anyone else with a 401, and `ApiClient` treats a 401 as
+   * a possible session expiry. For a non-admin this is always false and the read itself
+   * decides, as it always has (`db-list.ts` explains why nothing is pre-gated on admin).
+   *
+   * Only "exists" is remembered. "Missing" is asked again each time, so a database created in
+   * another tab, or by another admin, is picked up without a reload.
+   */
+  async knownMissing(): Promise<boolean> {
+    if (this.exists || !this.canListDatabases()) return false;
+    this.lookup ??= this.lookUpMissing().finally(() => {
+      this.lookup = null;
+    });
+    return this.lookup;
+  }
+
+  private async lookUpMissing(): Promise<boolean> {
+    const key = encodeURIComponent(JSON.stringify(COMPANION_DB));
+    let names: unknown;
+    try {
+      names = await this.api.request('GET', `/_all_dbs?start_key=${key}&end_key=${key}`);
+    } catch {
+      return false; // can't tell, so let the read find out, as it would have without asking
+    }
+    if (!Array.isArray(names)) return false;
+    this.exists = names.includes(COMPANION_DB);
+    return !this.exists;
+  }
 
   /**
    * `PUT /couchcompanion`. A `412 file_exists` — the natural race between two tabs, or two
@@ -136,9 +180,9 @@ export class CouchCompanionStore {
     try {
       await this.api.request('PUT', dbPath(COMPANION_DB));
     } catch (err) {
-      if (err instanceof ApiError && err.status === 412) return;
-      throw err;
+      if (!(err instanceof ApiError && err.status === 412)) throw err;
     }
+    this.exists = true;
   }
 
   /**
@@ -159,6 +203,7 @@ export class CouchCompanionStore {
    * instead of being caught here.
    */
   async list<T>(prefix: string): Promise<T[]> {
+    if (await this.knownMissing()) return [];
     const startkey = encodeURIComponent(JSON.stringify(prefix));
     const endkey = encodeURIComponent(JSON.stringify(prefix + HIGH_SENTINEL));
     try {
@@ -168,13 +213,16 @@ export class CouchCompanionStore {
       );
       return (resp.rows ?? []).flatMap((row) => (row.doc ? [row.doc] : []));
     } catch (err) {
-      if (isNotFound(err)) return [];
-      throw err;
+      if (!isNotFound(err)) throw err;
+      // Unlike a document read, a scan can only 404 because the database is gone.
+      this.exists = false;
+      return [];
     }
   }
 
   /** `GET /couchcompanion/{id}`. A 404 (document, or database, absent) resolves to `null`. */
   async get<T>(id: string): Promise<T | null> {
+    if (await this.knownMissing()) return null;
     try {
       return await this.api.request<T>('GET', docPath(COMPANION_DB, id));
     } catch (err) {
@@ -192,8 +240,12 @@ export class CouchCompanionStore {
    * because the *document* doesn't exist (the ordinary create path, and what the initial read hits
    * every time a document is new) never reaches that branch: only the write's own error is
    * inspected, and a `PUT` cannot 404 over a missing document.
+   *
+   * When the database is already {@link knownMissing known to be missing}, it is created first,
+   * so the first write never 404s at all (#74). The retry stays for everyone else.
    */
   async put(id: string, body: Record<string, unknown>): Promise<{ id: string; rev: string }> {
+    if (await this.knownMissing()) await this.ensureDatabase();
     const existing = await this.get<{ _rev?: string }>(id);
     const merged = existing?._rev ? { ...body, _rev: existing._rev } : { ...body };
     try {
@@ -238,6 +290,7 @@ export class CouchCompanionStore {
    * already-deleted document is a no-op here.
    */
   async removeAll(docs: Array<string | { _id: string; _rev?: string }>): Promise<void> {
+    if (await this.knownMissing()) return;
     const revById = new Map<string, string>();
     const needRev = new Set<string>();
     for (const doc of docs) {

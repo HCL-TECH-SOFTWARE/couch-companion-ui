@@ -52,6 +52,25 @@ LABEL org.opencontainers.image.title="Couch Companion" \
 # original Fauxton, and carrying a second copy in a layer buys nothing.
 RUN rm -rf /opt/couchdb/share/www && mkdir -p /opt/couchdb/share/www
 
+# CouchDB's built-in /_utils/ CSP has no `connect-src`, so it falls back to
+# `default-src 'self'` and the browser refuses every cross-origin call the app
+# makes — IdP discovery and token endpoints, git sync — before it reaches the
+# wire. `connect-src *` lifts that; `img-src data:` admits inline images.
+#
+# `[oidc] log = false` spells out the IdP activity log's default (off), so the
+# switch is visible in the config screen rather than discoverable only by docs.
+#
+# default.d, not local.d: these are defaults. Anything an operator sets in
+# local.ini or local.d/ — or PUTs to /_node/_local/_config at runtime — still
+# wins. Written inline because the build context is dist/ (see below).
+COPY <<'EOF' /opt/couchdb/etc/default.d/90-couch-companion.ini
+[csp]
+utils_header_value = default-src 'self'; connect-src *; img-src 'self' data:; font-src *; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src https://blog.couchdb.org;
+
+[oidc]
+log = false
+EOF
+
 # THE BUILD CONTEXT IS `dist/`, NOT THE REPOSITORY ROOT.
 #
 #   docker build -f docker/Dockerfile ... dist

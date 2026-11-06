@@ -103,13 +103,27 @@ the official CouchDB in every other respect — same entrypoint, same `5984`, sa
 you know about running the `couchdb` image applies unchanged, and databases in the named volume
 outlive the container, so a later version is a `docker rm` and a `docker run` away.
 
-Two things carry over from the drop-in, because the image *is* a drop-in:
+Fauxton is gone, including the bundled docs at `/_utils/docs/`. There is no backup kept inside
+the image — the base image is the backup. To see stock Fauxton again, run `couchdb:latest`.
 
-- Fauxton is gone, including the bundled docs at `/_utils/docs/`. There is no backup kept inside
-  the image — the base image is the backup. To see stock Fauxton again, run `couchdb:latest`.
-- Git sync still needs a CSP change, for exactly the reason described in
-  [the drop-in's CSP section](#git-sync-needs-one-more-change-couchdbs-content-security-policy).
-  The image ships CouchDB's default policy untouched.
+The image changes two config defaults, both in `/opt/couchdb/etc/default.d/90-couch-companion.ini`.
+The one that matters is the `/_utils/` Content-Security-Policy: CouchDB's built-in policy has no
+`connect-src`, which blocks every cross-origin request the app makes — IdP discovery and sign-in,
+git sync (see
+[the drop-in's CSP section](#git-sync-needs-one-more-change-couchdbs-content-security-policy)).
+The other spells out the [IdP activity log](#identity-provider-configuration-oidc) switch as off,
+which is its default anyway:
+
+    [csp]
+    utils_header_value = default-src 'self'; connect-src *; img-src 'self' data:; font-src *; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src https://blog.couchdb.org;
+
+    [oidc]
+    log = false
+
+`connect-src *` lets the admin UI call any host. That is what lets IdP and git hosts work without
+setup, and it is broader than either of them needs. To narrow it, set `[csp] utils_header_value`
+in `local.ini` or `local.d/`, or PUT it to `/_node/_local/_config/csp/utils_header_value`. Either
+one overrides the image's default.
 
 ### Publishing
 
@@ -502,7 +516,9 @@ Set it to enable the log:
     curl -u admin:password -X PUT $COUCH/_node/_local/_config/oidc/log -d '"true"'
 
 Accepted affirmative values are `true`, `1`, `yes`, `on` (case-insensitive, whitespace
-trimmed); anything else, including an absent key, means off. Turning it on is what creates the
+trimmed); anything else, including an absent key, means off. The container image sets
+`log = false` explicitly in `default.d/90-couch-companion.ini`, so the switch shows up in its
+config screen; a drop-in install leaves it absent, which means the same thing. Turning it on is what creates the
 `couchcompanion` database on the next IdP action, if nothing else has already created it.
 
 **`GET /_idp`.** If your CouchDB ever answers this path natively with an `idps` array, the app
