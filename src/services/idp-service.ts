@@ -219,7 +219,7 @@ export class IdpService {
     };
 
     await this.writeProvider(entry, keys);
-    await this.writeLog("info", "created", entry.issuer, req.name, `Registered ${req.name}`);
+    await this.writeLog("info", "created", entry.issuer, req.name, `Registered ${req.name}`, config);
     return this.buildIdpConfig(entry, keys.map((key) => ({ ...key, installed: true })));
   }
 
@@ -245,7 +245,7 @@ export class IdpService {
     for (const { kid, entry: previous } of provider.keys) {
       await this.putConfig(OIDC_SECTION, oidcKey(kid), serializeEntry({ ...entry, alg: previous.alg }));
     }
-    await this.writeLog("info", "updated", id, entry.name, `Updated ${entry.name}`);
+    await this.writeLog("info", "updated", id, entry.name, `Updated ${entry.name}`, config);
     return this.toIdpConfig({ ...provider, entry }, config);
   }
 
@@ -291,6 +291,7 @@ export class IdpService {
       entry.issuer,
       entry.name,
       `Refreshed ${keys.length} signing key(s)`,
+      config,
     );
     return this.buildIdpConfig(entry, keys.map((key) => ({ ...key, installed: true })));
   }
@@ -384,8 +385,9 @@ export class IdpService {
   async deleteIdp(id: string): Promise<DeleteResult | null> {
     const errors: string[] = [];
     let name: string | null = null;
+    let config: NodeConfig | undefined;
     try {
-      const config = await this.readConfig();
+      config = await this.readConfig();
       const provider = providersFrom(config).find((p) => p.issuer === id);
       name = provider?.entry.name ?? null;
       for (const { kid } of provider?.keys ?? []) {
@@ -400,6 +402,7 @@ export class IdpService {
       id,
       name,
       errors.length ? `Delete failed: ${errors.join("; ")}` : `Deleted ${name ?? id}`,
+      config,
     );
     return { idp_id: id, errors };
   }
@@ -417,9 +420,14 @@ export class IdpService {
    * Whether `[oidc] log` is on. **Off by default**: with it off nothing is written to
    * `couchcompanion` at all, so screens that show the log have to explain the silence rather
    * than report "nothing happened yet".
+   *
+   * Read out of the whole node config, never as `GET …/_config/oidc/log`: an unset key answers
+   * that with a 404, which the browser reports as a failed request after every IdP action.
+   *
+   * @param config - a node config the caller already read, saving the fetch
    */
-  async isLogEnabled(): Promise<boolean> {
-    return logEnabled(await this.config.getConfigValue(SINGLE_SERVER_ID, OIDC_SECTION, LOG_KEY));
+  async isLogEnabled(config?: NodeConfig): Promise<boolean> {
+    return logEnabled((config ?? (await this.readConfig()))[OIDC_SECTION]?.[LOG_KEY]);
   }
 
   /**
@@ -623,6 +631,9 @@ export class IdpService {
    *
    * Never throws: a failure to record what happened must not turn a successful apply into a
    * reported failure.
+   *
+   * @param config - the node config the operation read before it wrote. No IdP operation
+   *   changes `[oidc] log`, so that snapshot still answers whether to log.
    */
   private async writeLog(
     level: IdpLogEntry["level"],
@@ -630,9 +641,10 @@ export class IdpService {
     idpId: string | null,
     idpName: string | null,
     message: string,
+    config?: NodeConfig,
   ): Promise<void> {
     try {
-      if (!(await this.isLogEnabled())) return;
+      if (!(await this.isLogEnabled(config))) return;
       const timestamp = new Date().toISOString();
       const id = `${ID_PREFIX.idpLog}${timestamp}~${event}`;
       await this.store.put(id, {

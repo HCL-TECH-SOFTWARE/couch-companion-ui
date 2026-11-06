@@ -39,8 +39,9 @@ export class ConfigService {
    * One key's value, or `null` when the section or the key is absent.
    *
    * A missing key 404s, which is the ordinary answer for an optional setting that nobody has
-   * written — `[oidc] log`, for instance, whose absence means "off" (#32). Resolving that to
-   * `null` keeps the caller from having to tell a missing key apart from a failed read.
+   * written. Resolving that to `null` keeps the caller from having to tell a missing key apart
+   * from a failed read. The browser still reports the 404 as a failed request, so for a key that
+   * is usually unset, read it out of {@link getConfig} instead (as `[oidc] log` is, #72).
    */
   async getConfigValue(_serverId: string, section: string, key: string): Promise<string | null> {
     try {
