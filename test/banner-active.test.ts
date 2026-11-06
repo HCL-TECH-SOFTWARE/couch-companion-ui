@@ -22,6 +22,7 @@ import { ApiClient } from '../src/services/api-client';
 import { ApiError } from '../src/services/api-error';
 import { DbMgmtService } from '../src/services/db-mgmt-service';
 import { BannerAdminService } from '../src/services/banner-admin-service';
+import { CouchCompanionStore } from '../src/services/git/couchcompanion-store';
 
 describe('BannerAdminService.getActiveBanner', () => {
   let apiClient: ApiClient;
@@ -33,7 +34,7 @@ describe('BannerAdminService.getActiveBanner', () => {
   beforeEach(() => {
     apiClient = new ApiClient('http://test');
     dbMgmt = new DbMgmtService(apiClient);
-    service = new BannerAdminService(dbMgmt);
+    service = new BannerAdminService(dbMgmt, new CouchCompanionStore(apiClient));
   });
 
   afterEach(() => {
@@ -61,6 +62,16 @@ describe('BannerAdminService.getActiveBanner', () => {
     await expect(service.getActiveBanner()).resolves.toEqual({});
     vi.spyOn(dbMgmt, 'getDoc').mockRejectedValue(new TypeError('network'));
     await expect(service.getActiveBanner()).resolves.toEqual({});
+  });
+
+  it('does not read the banner from a couchcompanion that does not exist (#74)', async () => {
+    // A server admin's session: the store may ask _all_dbs, which answers [] for a missing database.
+    service = new BannerAdminService(dbMgmt, new CouchCompanionStore(apiClient, () => true));
+    vi.spyOn(apiClient, 'request').mockResolvedValue([]);
+    const read = vi.spyOn(dbMgmt, 'getDoc');
+
+    await expect(service.getActiveBanner()).resolves.toEqual({});
+    expect(read).not.toHaveBeenCalled();
   });
 
   it('ignores a malformed banners field', async () => {

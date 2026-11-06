@@ -18,6 +18,7 @@
  */
 
 import type { DbMgmtService } from './db-mgmt-service.js';
+import type { CouchCompanionStore } from './git/couchcompanion-store.js';
 import type { SaveDocumentResponse } from '../plugins/db-mgmt/types.js';
 import type { Banner } from '../types/api.js';
 import { ApiError } from './api-error.js';
@@ -27,9 +28,16 @@ import { BANNER_DB, BANNER_DOC_ID } from '../plugins/banner-admin/types.js';
 /**
  * Reads/writes the companion server's `couchcompanion` → `BannerMessages` document
  * by reusing the generic document proxy.
+ *
+ * @param db - the generic document proxy the banner is read and saved through
+ * @param companion - asked first whether `couchcompanion` exists at all, since the shell reads the
+ *   banner on every page load and most servers never create that database (#74)
  */
 export class BannerAdminService {
-  constructor(private db: DbMgmtService) {}
+  constructor(
+    private db: DbMgmtService,
+    private companion: CouchCompanionStore,
+  ) {}
 
   /**
    * There is exactly one server (spec D2/D3), so this always resolves to it —
@@ -41,6 +49,7 @@ export class BannerAdminService {
 
   /** Loads the `BannerMessages` document, or `null` when it does not exist yet (404). */
   async getBannerDoc(serverId: string): Promise<Record<string, unknown> | null> {
+    if (await this.companion.knownMissing()) return null;
     try {
       return await this.db.getDoc(serverId, BANNER_DB, BANNER_DOC_ID);
     } catch (err: unknown) {

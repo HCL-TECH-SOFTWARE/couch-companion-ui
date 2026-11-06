@@ -272,3 +272,133 @@ describe('CouchCompanionStore', () => {
     });
   });
 });
+
+/**
+ * #74: a server that has never run a git sync has no `couchcompanion`, and every read of it used
+ * to answer 404, which the browser reports as a failed request. A server admin can ask
+ * `_all_dbs` instead, which answers 200 either way.
+ */
+describe('CouchCompanionStore when couchcompanion may not exist (#74)', () => {
+  const DB = dbPath(COMPANION_DB);
+  const KEY = encodeURIComponent(JSON.stringify(COMPANION_DB));
+  const ALL_DBS = `/_all_dbs?start_key=${KEY}&end_key=${KEY}`;
+
+  let apiClient: ApiClient;
+  let requestSpy: MockInstance;
+  let dbExists: boolean;
+  /** Requests that 404ed because the database was missing: the noise #74 is about. */
+  let missingDb404s: number;
+
+  /** A CouchDB with or without `couchcompanion`, answering the way 3.5.2 does. */
+  function serve(method: string, path: string): unknown {
+    if (path === ALL_DBS) return dbExists ? [COMPANION_DB] : [];
+    if (method === 'PUT' && path === DB) {
+      if (dbExists) throw new ApiError(412, 'The database could not be created, the file already exists.');
+      dbExists = true;
+      return { ok: true };
+    }
+    if (!dbExists) {
+      missingDb404s++;
+      throw new ApiError(404, 'Database does not exist.');
+    }
+    if (path.includes('/_all_docs') || path.includes('/_bulk_docs')) return { rows: [] };
+    if (method === 'GET') throw new ApiError(404, 'missing');
+    return { id: 'x', rev: '1-a' };
+  }
+
+  const pathsAsked = () => requestSpy.mock.calls.map(([, path]) => String(path));
+  const touchedDatabase = () =>
+    pathsAsked().filter((p) => p === DB || p.startsWith(`${DB}/`) || p.startsWith(`${DB}?`));
+
+  function storeFor(admin: boolean) {
+    apiClient = new ApiClient('http://test');
+    requestSpy = vi
+      .spyOn(apiClient, 'request')
+      .mockImplementation(async (method: string, path: string) => serve(method, path) as never);
+    return new CouchCompanionStore(apiClient, () => admin);
+  }
+
+  beforeEach(() => {
+    dbExists = false;
+    missingDb404s = 0;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('answers every read with "nothing" and never touches a missing database', async () => {
+    const store = storeFor(true);
+
+    expect(await store.list(ID_PREFIX.repo)).toEqual([]);
+    expect(await store.get('gitaccount:1')).toBeNull();
+    await store.remove('gitaccount:1');
+    await store.removeAll(['sync:sales~ddoc:views', { _id: 'conflict:x' }]);
+
+    expect(touchedDatabase()).toEqual([]);
+    expect(missingDb404s).toBe(0);
+  });
+
+  it('creates the database before the first write instead of letting the write 404', async () => {
+    const store = storeFor(true);
+
+    await store.put('gitaccount:1', { doc_type: 'gitaccount' });
+
+    expect(missingDb404s).toBe(0);
+    const writes = requestSpy.mock.calls.filter(([method]) => method === 'PUT').map(([, path]) => path);
+    expect(writes).toEqual([DB, docPath(COMPANION_DB, 'gitaccount:1')]);
+  });
+
+  it('asks once a database exists, even for reads in flight together', async () => {
+    dbExists = true;
+    const store = storeFor(true);
+
+    await Promise.all([store.list(ID_PREFIX.repo), store.list(ID_PREFIX.account)]);
+    await store.list(ID_PREFIX.sync);
+
+    expect(pathsAsked().filter((p) => p === ALL_DBS)).toHaveLength(1);
+  });
+
+  it('asks again while it is missing, so a database created elsewhere is picked up', async () => {
+    const store = storeFor(true);
+    await store.list(ID_PREFIX.repo);
+
+    dbExists = true; // another tab, or another admin, ran its first git sync
+    await store.list(ID_PREFIX.repo);
+
+    expect(touchedDatabase()).toHaveLength(1);
+  });
+
+  it('notices a database deleted after it was known to exist', async () => {
+    dbExists = true;
+    const store = storeFor(true);
+    await store.list(ID_PREFIX.repo);
+
+    dbExists = false;
+    expect(await store.list(ID_PREFIX.repo)).toEqual([]); // one 404, the way it found out
+    expect(await store.list(ID_PREFIX.repo)).toEqual([]);
+
+    expect(missingDb404s).toBe(1);
+  });
+
+  it('lets the read decide when _all_dbs cannot be asked', async () => {
+    const store = storeFor(true);
+    requestSpy.mockImplementation(async (method: string, path: string) => {
+      if (path === ALL_DBS) throw new TypeError('Failed to fetch');
+      return serve(method, path) as never;
+    });
+
+    expect(await store.list(ID_PREFIX.repo)).toEqual([]);
+
+    expect(touchedDatabase()).toHaveLength(1);
+  });
+
+  it('never asks _all_dbs for a non-admin, whom CouchDB answers with a 401', async () => {
+    const store = storeFor(false);
+
+    expect(await store.list(ID_PREFIX.repo)).toEqual([]);
+
+    expect(pathsAsked()).not.toContain(ALL_DBS);
+    expect(touchedDatabase()).toHaveLength(1); // the read itself, unchanged
+  });
+});
