@@ -258,8 +258,8 @@ export function connect(url) {
 /**
  * How long Chrome gets to open its DevTools port. Generous on purpose: a healthy launch returns the
  * moment the file appears, so this only bounds how long a broken one takes to report. It used to be
- * 10 s, and PR #73's first CI run hit that on a fresh runner image — Chrome still alive, port never
- * opened, and nothing in the log to say whether it was slow or hung.
+ * 10 s, and PR #73's CI hit that three runs in a row — Chrome still alive, port never opened, and
+ * nothing in the log to say whether it was slow or hung.
  */
 const DEVTOOLS_PORT_TIMEOUT_MS = 30_000;
 
