@@ -17,7 +17,7 @@ docker run --rm \
   -p 5984:5984 \
   -e COUCHDB_USER=admin \
   -e COUCHDB_PASSWORD=password \
-  ghcr.io/hcl-tech-software/couch-companion:0.4.1
+  ghcr.io/hcl-tech-software/couch-companion:latest
 ```
 
 > [!CAUTION]
