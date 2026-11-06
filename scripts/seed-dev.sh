@@ -118,6 +118,11 @@ cfg "cors/headers" '"accept, authorization, content-type, origin, referer"'
 # _config PUT to csp takes effect on the next request; no restart needed.
 cfg "csp/utils_header_value" "\"default-src 'self'; connect-src *; img-src 'self' data:; font-src *; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src https://blog.couchdb.org;\""
 
+# Also from the image: the IdP activity log, spelled out as off. Only written
+# while unset, so a dev who turned it on keeps it on across container starts.
+curl -sf -u "$ADMIN" "$COUCH/_node/_local/_config/oidc/log" >/dev/null 2>&1 ||
+  cfg "oidc/log" '"false"'
+
 # Non-admin CouchDB-native user for role-gating tests (spec D9)
 DEMO_REV=$(curl -s -u "$ADMIN" "$COUCH/_users/org.couchdb.user:demo" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')
 curl -sf -u "$ADMIN" -X PUT "$COUCH/_users/org.couchdb.user:demo${DEMO_REV:+?rev=$DEMO_REV}" \
