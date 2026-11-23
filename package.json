@@ -32,7 +32,7 @@
     "@types/d3": "^7.4.3",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^5.1.0",
-    "@web/test-runner-commands": "^1.0.1",
+    "@web/test-runner-commands": "^1.1.0",
     "happy-dom": "^21.0.4",
     "oxlint": "^1.91.0",
     "prettier": "^3.9.10",
